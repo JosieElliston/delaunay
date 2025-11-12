@@ -159,7 +159,7 @@ impl App {
         Self {
             camera: Camera::new(0.5, 0.5, 0.5),
             velocity: Vec2::ZERO,
-            dts: egui::util::History::new(1..100, 0.1),
+            dts: egui::util::History::new(1..256, 1.0),
             points: [
                 (0.695, 0.5075),
                 (0.60425, 0.59325),
@@ -225,7 +225,7 @@ impl eframe::App for App {
                     let pan_offset = |pan_vec: Vec2, real_rad: f32| -> (f32, f32) {
                         (
                             2.0 * pan_vec.x / rect.size().x * real_rad,
-                            -2.0 * pan_vec.y * (real_rad / rect.size().x),
+                            -2.0 * pan_vec.y * real_rad / rect.size().x,
                         )
                     };
 
@@ -233,38 +233,39 @@ impl eframe::App for App {
                     let mouse_down =
                         r.is_pointer_button_down_on() && ctx.input(|i| i.pointer.primary_down());
 
-                    // TODO: this can have better logic
                     if !mouse_down {
                         self.drag_point = None;
                     }
-                    if ctx.input(|i| i.pointer.primary_pressed()) {
-                        self.drag_point = highlighted_point;
+                    if let Some(highlighted_point) = highlighted_point
+                        && ctx.input(|i| i.pointer.primary_pressed())
+                    {
+                        self.drag_point = Some(highlighted_point);
                     }
 
-                    if mouse_down && let Some(drag_point) = self.drag_point {
-                        self.points[drag_point] += pan_offset(r.drag_delta(), self.camera.x_rad as _).into();
-                        // if let Some(mouse_pos) = ctx.input(|i| i.pointer.latest_pos()) {
-                        //     let cam_pos = camera_map.egui_to_cam(mouse_pos);
-                        //     self.points[drag_point] = cam_pos;
-                        // }
-                    } else
-                    // if mouse_down && let Some(highlighted_point) = highlighted_point {
-                    //     if let Some(mouse_pos) = ctx.input(|i| i.pointer.latest_pos()) {
-                    //         let cam_pos = camera_map.egui_to_cam(mouse_pos);
-                    //         self.points[highlighted_point] = cam_pos;
-                    //     }
-                    // } else
+                    // pan / drag
                     if mouse_down {
-                        self.camera -= pan_offset(r.drag_delta(), self.camera.x_rad as _);
-                        self.velocity = r.drag_delta() / dt;
+                        if let Some(drag_point) = self.drag_point {
+                            // self.points[drag_point] +=
+                            //     pan_offset(r.drag_delta(), self.camera.x_rad as _).into();
+                            if let Some(mouse_pos) = ctx.input(|i| i.pointer.latest_pos()) {
+                                let cam_pos = camera_map.egui_to_cam(mouse_pos);
+                                self.points[drag_point] = cam_pos;
+                            }
+                        } else if r.drag_delta() != Vec2::ZERO {
+                            self.camera -= pan_offset(r.drag_delta(), self.camera.x_rad as _);
+                            self.velocity = r.drag_delta() / dt;
+                        }
                     } else {
-                        const VELOCITY_DAMPING: f32 = 0.9999;
+                        const VELOCITY_DAMPING: f32 = 16.0;
+                        // self.velocity *= (1.0 - VELOCITY_DAMPING).powf(dt);
+                        self.velocity *= 1.0 / (1.0 + (dt * VELOCITY_DAMPING));
                         self.camera -= pan_offset(self.velocity * dt, self.camera.x_rad as _);
-                        self.velocity *= (1.0 - VELOCITY_DAMPING).powf(dt);
                     }
                     if self.velocity.length_sq() < 0.0001 {
                         self.velocity = Vec2::ZERO;
                     }
+
+                    // zoom
                     if r.contains_pointer()
                         && let Some(mouse_pos) = ctx.input(|i| i.pointer.latest_pos())
                     {
@@ -277,9 +278,43 @@ impl eframe::App for App {
                 }
                 let camera_map = CameraMap::new(ui.max_rect(), self.camera);
 
-                // draw the stuff
+                // drawing
                 {
                     let painter = ui.painter_at(ui.max_rect());
+
+                    // draw debug ~quadtree lines
+                    {
+                        let draw = |mid: Point, rad: Coord| {
+                            const PRIMARY_COLOR: Color32 = Color32::from_rgb(10, 10, 255);
+                            const SECONDARY_COLOR: Color32 = Color32::from_rgb(100, 100, 200);
+
+                            let ul =
+                                camera_map.cam_to_egui(Point::new(mid.x() - rad, mid.y() + rad));
+                            let ur =
+                                camera_map.cam_to_egui(Point::new(mid.x() + rad, mid.y() + rad));
+                            let dl =
+                                camera_map.cam_to_egui(Point::new(mid.x() - rad, mid.y() - rad));
+                            let dr =
+                                camera_map.cam_to_egui(Point::new(mid.x() + rad, mid.y() - rad));
+
+                            painter.line_segment([ul, ur], (1.0, PRIMARY_COLOR));
+                            painter.line_segment([ur, dr], (1.0, PRIMARY_COLOR));
+                            painter.line_segment([dr, dl], (1.0, PRIMARY_COLOR));
+                            painter.line_segment([dl, ul], (1.0, PRIMARY_COLOR));
+
+                            let um = camera_map.cam_to_egui(Point::new(mid.x(), mid.y() + rad));
+                            let dm = camera_map.cam_to_egui(Point::new(mid.x(), mid.y() - rad));
+                            let lm = camera_map.cam_to_egui(Point::new(mid.x() - rad, mid.y()));
+                            let rm = camera_map.cam_to_egui(Point::new(mid.x() + rad, mid.y()));
+
+                            painter.line_segment([um, dm], (1.0, SECONDARY_COLOR));
+                            painter.line_segment([lm, rm], (1.0, SECONDARY_COLOR));
+                        };
+
+                        draw(Point::new(1.0 / 2.0, 1.0 / 2.0), 1.0 / 2.0);
+                        draw(Point::new(3.0 / 4.0, 3.0 / 4.0), 1.0 / 4.0);
+                        draw(Point::new(5.0 / 8.0, 5.0 / 8.0), 1.0 / 8.0);
+                    }
 
                     // draw triangulation
                     {
