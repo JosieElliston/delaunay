@@ -5,3 +5,8 @@ edition = "2024"
 
 [dependencies]
 eframe = "0.33.0"
+
+[profile.profiling]
+# samply record cargo run --profile profiling
+inherits = "release"
+debug = true

@@ -2,9 +2,9 @@ mod point;
 mod quartic;
 mod utils;
 
-use core::panic;
-use std::collections::HashSet;
+use std::iter::once;
 
+use eframe::egui::ahash::{HashMap, HashMapExt, HashSet};
 use eframe::egui::{self, Color32, Key, Pos2, Rect, RichText, Vec2};
 
 use crate::point::*;
@@ -126,27 +126,6 @@ impl CameraMap {
     fn cam_to_egui(&self, point: Point) -> Pos2 {
         Pos2::new(self.cam_to_egui_x(point.x()), self.cam_to_egui_y(point.y()))
     }
-
-    fn pan(&mut self, pan_vec: Pos2) {
-        todo!()
-    }
-
-    // fn window_to_rect(&self, window: impl Into<Window>) -> Rect {
-    //     let window = window.into();
-    //     Rect {
-    //         min: self.complex_to_pos((window.real_lo, window.imag_hi)),
-    //         max: self.complex_to_pos((window.real_hi, window.imag_lo)),
-    //     }
-    // }
-
-    // fn rect_to_window(&self, rect: Rect) -> Window {
-    //     Window::new(
-    //         self.egui_to_cam_x(rect.min.x),
-    //         self.egui_to_cam_x(rect.max.x),
-    //         self.egui_to_cam_y(rect.max.y),
-    //         self.egui_to_cam_y(rect.min.y),
-    //     )
-    // }
 }
 
 struct App {
@@ -324,35 +303,21 @@ impl eframe::App for App {
                 }
                 let camera_map = CameraMap::new(ui.max_rect(), self.camera);
                 let triangles = quartic::triangulate(&self.points);
-                let highlighted_point_triangles = triangles
-                    .iter()
-                    .filter_map(|&(a_i, b_i, c_i)| match highlighted_point {
-                        Some(i) if a_i == i => Some((b_i, c_i)),
-                        Some(i) if b_i == i => Some((c_i, a_i)),
-                        Some(i) if c_i == i => Some((a_i, b_i)),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>();
                 let edge_to_tri = {
-                    let mut map = std::collections::HashMap::new();
+                    let mut map: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
                     for &(a_i, b_i, c_i) in &triangles {
                         map.entry(utils::canonicalize_edge(a_i, b_i))
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push(c_i);
                         map.entry(utils::canonicalize_edge(b_i, c_i))
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push(a_i);
                         map.entry(utils::canonicalize_edge(c_i, a_i))
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push(b_i);
                     }
                     map
                 };
-                let highlighted_point_adj_points: HashSet<usize> = HashSet::from_iter(
-                    highlighted_point_triangles
-                        .iter()
-                        .flat_map(|&(b_i, c_i)| [b_i, c_i]),
-                );
 
                 // drawing
                 {
@@ -360,23 +325,42 @@ impl eframe::App for App {
 
                     // invariant region
                     if let Some(highlighted_point) = highlighted_point {
+                        let highlighted_point_triangles = triangles
+                            .iter()
+                            .filter_map(|&(a_i, b_i, c_i)| match highlighted_point {
+                                _ if a_i == highlighted_point => Some((b_i, c_i)),
+                                _ if b_i == highlighted_point => Some((c_i, a_i)),
+                                _ if c_i == highlighted_point => Some((a_i, b_i)),
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>();
+                        let highlighted_point_adj_points: HashSet<usize> = HashSet::from_iter(
+                            highlighted_point_triangles
+                                .iter()
+                                .flat_map(|&(b_i, c_i)| [b_i, c_i]),
+                        );
+
                         let x_lo = highlighted_point_adj_points
                             .iter()
+                            .chain(once(&highlighted_point))
                             .map(|&p_i| self.points[p_i].x())
                             .min_by(Coord::total_cmp)
                             .unwrap();
                         let x_hi = highlighted_point_adj_points
                             .iter()
+                            .chain(once(&highlighted_point))
                             .map(|&p_i| self.points[p_i].x())
                             .max_by(Coord::total_cmp)
                             .unwrap();
                         let y_lo = highlighted_point_adj_points
                             .iter()
+                            .chain(once(&highlighted_point))
                             .map(|&p_i| self.points[p_i].y())
                             .min_by(Coord::total_cmp)
                             .unwrap();
                         let y_hi = highlighted_point_adj_points
                             .iter()
+                            .chain(once(&highlighted_point))
                             .map(|&p_i| self.points[p_i].y())
                             .max_by(Coord::total_cmp)
                             .unwrap();
