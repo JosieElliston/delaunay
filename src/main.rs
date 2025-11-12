@@ -1,40 +1,34 @@
 mod point;
+mod quartic;
+mod triangulation;
+mod utils;
 
 use eframe::egui::{self, Color32, Key, Pos2, Rect, RichText, Vec2};
 
-fn main() -> eframe::Result {
+use crate::point::*;
+use crate::utils::*;
+
+fn main() {
     // std::env::set_var("RUST_BACKTRACE", "1");
 
     let native_options = eframe::NativeOptions::default();
 
-    eframe::run_native(
+    let _ = eframe::run_native(
         "delaunay",
         native_options,
         Box::new(|cc| Ok(Box::new(App::new(cc)))),
-    )
-}
-
-pub(crate) fn lerp(lo: f32, hi: f32, t: f32) -> f32 {
-    assert!(lo < hi);
-    // assert!((0.0..=1.0).contains(&t));
-    // lo * (1.0 - t) + hi * t
-    lo + (hi - lo) * t
-}
-
-pub(crate) fn inv_lerp(lo: f32, hi: f32, x: f32) -> f32 {
-    assert!(lo < hi);
-    // assert!((lo..=hi).contains(&x));
-    (x - lo) / (hi - lo)
+    );
+    // println!("here");
 }
 
 #[derive(Debug, Clone, Copy)]
 struct Camera {
-    x_mid: f32,
-    y_mid: f32,
-    x_rad: f32,
+    x_mid: Coord,
+    y_mid: Coord,
+    x_rad: Coord,
 }
 impl Camera {
-    fn new(x_mid: f32, y_mid: f32, x_rad: f32) -> Self {
+    fn new(x_mid: Coord, y_mid: Coord, x_rad: Coord) -> Self {
         assert!(x_rad > 0.0);
         Self {
             x_mid,
@@ -43,24 +37,30 @@ impl Camera {
         }
     }
 
-    // fn real_lo(self) -> f32 {
-    //     self.x_mid - self.x_rad
-    // }
+    fn x_lo(self) -> Coord {
+        self.x_mid - self.x_rad
+    }
 
-    // fn real_hi(self) -> f32 {
-    //     self.x_mid + self.x_rad
-    // }
+    fn x_hi(self) -> Coord {
+        self.x_mid + self.x_rad
+    }
 
-    // fn imag_lo(self) -> f32 {}
+    // fn imag_lo(self) -> Coord {}
 
-    // fn imag_hi(self) -> f32 {}
+    // fn imag_hi(self) -> Coord {}
 }
-// impl std::ops::AddAssign<(f32, f32)> for Camera {
-//     fn add_assign(&mut self, rhs: (f32, f32)) {
-//         self.x_mid += rhs.0;
-//         self.y_mid += rhs.1;
-//     }
-// }
+impl std::ops::AddAssign<(f32, f32)> for Camera {
+    fn add_assign(&mut self, rhs: (f32, f32)) {
+        self.x_mid += rhs.0 as Coord;
+        self.y_mid += rhs.1 as Coord;
+    }
+}
+impl std::ops::SubAssign<(f32, f32)> for Camera {
+    fn sub_assign(&mut self, rhs: (f32, f32)) {
+        self.x_mid -= rhs.0 as Coord;
+        self.y_mid -= rhs.1 as Coord;
+    }
+}
 
 struct CameraMap {
     rect: Rect,
@@ -73,97 +73,108 @@ impl CameraMap {
         Self { rect, camera }
     }
 
-    // fn imag_rad(&self) -> f32 {
-    //     self.camera.x_rad * self.rect.height() / self.rect.width()
-    // }
+    fn y_rad(&self) -> Coord {
+        self.camera.x_rad * self.rect.height() as Coord / self.rect.width() as Coord
+    }
 
-    // fn imag_lo(&self) -> f32 {
-    //     self.camera.y_mid - self.imag_rad()
-    // }
+    fn y_lo(&self) -> Coord {
+        self.camera.y_mid - self.y_rad()
+    }
 
-    // fn imag_hi(&self) -> f32 {
-    //     self.camera.y_mid + self.imag_rad()
-    // }
+    fn y_hi(&self) -> Coord {
+        self.camera.y_mid + self.y_rad()
+    }
 
     fn egui_to_cam_x(&self, x: f32) -> Coord {
-        // -2.0 * x / self.rect.size().x * self.camera.real_rad
-        lerp(
-            self.camera.real_lo(),
-            self.camera.real_hi(),
-            inv_lerp(self.rect.min.x, self.rect.max.x, x),
+        lerp_coord(
+            self.camera.x_lo(),
+            self.camera.x_hi(),
+            inv_lerp_f32(self.rect.min.x, self.rect.max.x, x) as Coord,
         )
     }
 
     fn egui_to_cam_y(&self, y: f32) -> Coord {
-        // 2.0 * y * (self.camera.real_rad / self.rect.size().x)
-        lerp(
-            self.imag_lo(),
-            self.imag_hi(),
-            1.0 - inv_lerp(self.rect.min.y, self.rect.max.y, y),
+        lerp_coord(
+            self.y_lo(),
+            self.y_hi(),
+            1.0 - inv_lerp_f32(self.rect.min.y, self.rect.max.y, y) as Coord,
         )
     }
 
     fn egui_to_cam(&self, pos: Pos2) -> Point {
-        (self.egui_to_cam_x(pos.x), self.egui_to_cam_y(pos.y))
+        Point::new(self.egui_to_cam_x(pos.x), self.egui_to_cam_y(pos.y))
     }
 
-    fn real_to_x(&self, real: f32) -> f32 {
-        lerp(
+    fn cam_to_egui_x(&self, x: Coord) -> f32 {
+        lerp_f32(
             self.rect.min.x,
             self.rect.max.x,
-            inv_lerp(self.camera.real_lo(), self.camera.real_hi(), real),
+            inv_lerp_coord(self.camera.x_lo(), self.camera.x_hi(), x) as f32,
         )
     }
 
-    fn imag_to_y(&self, imag: f32) -> f32 {
-        lerp(
+    fn cam_to_egui_y(&self, y: Coord) -> f32 {
+        lerp_f32(
             self.rect.min.y,
             self.rect.max.y,
-            1.0 - inv_lerp(self.imag_lo(), self.imag_hi(), imag),
+            1.0 - inv_lerp_coord(self.y_lo(), self.y_hi(), y) as f32,
         )
     }
 
-    // fn complex_to_pos(&self, real: f32, imag: f32) -> Pos2 {
-    //     Pos2::new(self.real_to_x(real), self.imag_to_y(imag))
+    fn cam_to_egui(&self, point: Point) -> Pos2 {
+        Pos2::new(self.cam_to_egui_x(point.x()), self.cam_to_egui_y(point.y()))
+    }
+
+    fn pan(&mut self, pan_vec: Pos2) {
+        todo!()
+    }
+
+    // fn window_to_rect(&self, window: impl Into<Window>) -> Rect {
+    //     let window = window.into();
+    //     Rect {
+    //         min: self.complex_to_pos((window.real_lo, window.imag_hi)),
+    //         max: self.complex_to_pos((window.real_hi, window.imag_lo)),
+    //     }
     // }
 
-    fn complex_to_pos(&self, c: (f32, f32)) -> Pos2 {
-        Pos2::new(self.real_to_x(c.0), self.imag_to_y(c.1))
-    }
-
-    fn window_to_rect(&self, window: impl Into<Window>) -> Rect {
-        let window = window.into();
-        Rect {
-            min: self.complex_to_pos((window.real_lo, window.imag_hi)),
-            max: self.complex_to_pos((window.real_hi, window.imag_lo)),
-        }
-    }
-
-    fn rect_to_window(&self, rect: Rect) -> Window {
-        Window::new(
-            self.egui_to_cam_x(rect.min.x),
-            self.egui_to_cam_x(rect.max.x),
-            self.egui_to_cam_y(rect.max.y),
-            self.egui_to_cam_y(rect.min.y),
-        )
-    }
+    // fn rect_to_window(&self, rect: Rect) -> Window {
+    //     Window::new(
+    //         self.egui_to_cam_x(rect.min.x),
+    //         self.egui_to_cam_x(rect.max.x),
+    //         self.egui_to_cam_y(rect.max.y),
+    //         self.egui_to_cam_y(rect.min.y),
+    //     )
+    // }
 }
 
 struct App {
-    tree: Tree,
-    stride: usize,
     camera: Camera,
     velocity: Vec2,
     dts: egui::util::History<f32>,
+    points: Vec<Point>,
+    drag_point: Option<usize>,
 }
 impl App {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         Self {
-            tree: Tree::new_leaf(Square::try_new(-4.0, 4.0, -4.0, 4.0).unwrap()),
-            stride: 1,
-            camera: Camera::new(0.0, 0.0, 2.0),
+            camera: Camera::new(0.5, 0.5, 0.5),
             velocity: Vec2::ZERO,
             dts: egui::util::History::new(1..100, 0.1),
+            points: [
+                (0.695, 0.5075),
+                (0.60425, 0.59325),
+                (0.51, 0.7335),
+                (0.6975, 0.72),
+                (0.8855, 0.90325),
+                (0.80825, 0.648),
+                (0.68925, 0.7925),
+                (0.1325, 0.855),
+                (0.959, 0.0125),
+                (1.015, 0.516),
+            ]
+            .map(Point::from)
+            .to_vec(),
+            drag_point: None,
         }
     }
 }
@@ -178,6 +189,34 @@ impl eframe::App for App {
                     ctx.input(|input_state| input_state.stable_dt),
                 );
 
+                let camera_map = CameraMap::new(ui.max_rect(), self.camera);
+
+                // this is in egui coords
+                const HIGHLIGHT_DIST: f32 = 10.0;
+                // the point the mouse is closest to and within threshold distance
+                let highlighted_point = {
+                    if let Some(drag_point) = self.drag_point {
+                        Some(drag_point)
+                    } else {
+                        // TODO: quadtree lmao
+                        ctx.input(|i| i.pointer.hover_pos()).and_then(|mouse_pos| {
+                            self.points
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(i, &point)| {
+                                    let dist = (camera_map.cam_to_egui(point) - mouse_pos).length();
+                                    if dist < HIGHLIGHT_DIST {
+                                        Some((i, dist))
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+                                .map(|(i, _)| i)
+                        })
+                    }
+                };
+
                 // panning stuff
                 {
                     let rect = ui.available_rect_before_wrap();
@@ -185,18 +224,42 @@ impl eframe::App for App {
 
                     let pan_offset = |pan_vec: Vec2, real_rad: f32| -> (f32, f32) {
                         (
-                            -2.0 * pan_vec.x / rect.size().x * real_rad,
-                            2.0 * pan_vec.y * (real_rad / rect.size().x),
+                            2.0 * pan_vec.x / rect.size().x * real_rad,
+                            -2.0 * pan_vec.y * (real_rad / rect.size().x),
                         )
                     };
 
                     let dt = ctx.input(|input_state| input_state.stable_dt);
-                    if r.is_pointer_button_down_on() && ctx.input(|i| i.pointer.primary_down()) {
-                        self.camera += pan_offset(r.drag_delta(), self.camera.x_rad);
+                    let mouse_down =
+                        r.is_pointer_button_down_on() && ctx.input(|i| i.pointer.primary_down());
+
+                    // TODO: this can have better logic
+                    if !mouse_down {
+                        self.drag_point = None;
+                    }
+                    if ctx.input(|i| i.pointer.primary_pressed()) {
+                        self.drag_point = highlighted_point;
+                    }
+
+                    if mouse_down && let Some(drag_point) = self.drag_point {
+                        self.points[drag_point] += pan_offset(r.drag_delta(), self.camera.x_rad as _).into();
+                        // if let Some(mouse_pos) = ctx.input(|i| i.pointer.latest_pos()) {
+                        //     let cam_pos = camera_map.egui_to_cam(mouse_pos);
+                        //     self.points[drag_point] = cam_pos;
+                        // }
+                    } else
+                    // if mouse_down && let Some(highlighted_point) = highlighted_point {
+                    //     if let Some(mouse_pos) = ctx.input(|i| i.pointer.latest_pos()) {
+                    //         let cam_pos = camera_map.egui_to_cam(mouse_pos);
+                    //         self.points[highlighted_point] = cam_pos;
+                    //     }
+                    // } else
+                    if mouse_down {
+                        self.camera -= pan_offset(r.drag_delta(), self.camera.x_rad as _);
                         self.velocity = r.drag_delta() / dt;
                     } else {
                         const VELOCITY_DAMPING: f32 = 0.9999;
-                        self.camera += pan_offset(self.velocity * dt, self.camera.x_rad);
+                        self.camera -= pan_offset(self.velocity * dt, self.camera.x_rad as _);
                         self.velocity *= (1.0 - VELOCITY_DAMPING).powf(dt);
                     }
                     if self.velocity.length_sq() < 0.0001 {
@@ -207,271 +270,50 @@ impl eframe::App for App {
                     {
                         let mouse = mouse_pos - rect.center();
                         let zoom = ctx.input(|i| (i.smooth_scroll_delta.y / 300.0).exp());
-                        self.camera += pan_offset(-mouse, self.camera.x_rad);
-                        self.camera.x_rad /= zoom;
-                        self.camera += pan_offset(mouse, self.camera.x_rad);
+                        self.camera -= pan_offset(-mouse, self.camera.x_rad as _);
+                        self.camera.x_rad /= zoom as Coord;
+                        self.camera -= pan_offset(mouse, self.camera.x_rad as _);
                     }
                 }
-
                 let camera_map = CameraMap::new(ui.max_rect(), self.camera);
-                // ensure_pixel_safe for all pixels
-                // if ctx.input(|i| i.key_down(Key::Space)) {
-                //     for (_, pixel) in camera_map.pixels(self.stride) {
-                //         self.tree.ensure_pixel_safe(pixel);
-                //     }
-                // }
 
-                // // ensure_pixel_safe with time bound
-                // if !ctx.input(|i| i.key_down(Key::Space)) {
-                //     const MAX_TIME: Duration = Duration::from_millis(100);
-                //     let start = Instant::now();
-                //     let mut rng = rand::rng();
-                //     let pixels = {
-                //         let mut pixels = camera_map
-                //             .pixels(self.stride)
-                //             .map(|(_, pixel)| pixel)
-                //             .filter(|pixel| !self.tree.contains_sample(*pixel))
-                //             .collect::<Vec<_>>();
-                //         pixels.shuffle(&mut rng);
-                //         pixels
-                //     };
-                //     for pixel in pixels {
-                //         if start.elapsed() > MAX_TIME {
-                //             break;
-                //         }
-                //         if !self.tree.contains_sample(pixel) {
-                //             self.tree.ensure_pixel_safe(pixel);
-                //         }
-                //     }
-                // }
-
-                // ensure_pixel_safe with time bound
-                // but with a decreasing stride
-                if !ctx.input(|i| i.key_down(Key::Space)) {
-                    const MAX_TIME: Duration = Duration::from_millis(100);
-                    let start = Instant::now();
-                    let mut rng = rand::rng();
-
-                    'outer: for stride_pow in
-                        (self.stride.ilog2()..(ui.max_rect().width() as u32).ilog2()).rev()
-                    {
-                        let stride = 1 << stride_pow;
-
-                        let pixels = {
-                            let mut pixels = camera_map
-                                .pixels(stride)
-                                .map(|(_, _, pixel)| pixel)
-                                .filter(|pixel| !self.tree.contains_sample(*pixel))
-                                .collect::<Vec<_>>();
-                            pixels.shuffle(&mut rng);
-                            pixels
-                        };
-                        for pixel in pixels {
-                            if start.elapsed() > MAX_TIME {
-                                break 'outer;
-                            }
-                            if !self.tree.contains_sample(pixel) {
-                                self.tree.ensure_pixel_safe(pixel);
-                            }
-                        }
-                    }
-                }
-
-                // // draw the fractal
-                // {
-                //     let painter = ui.painter_at(ui.max_rect());
-
-                //     painter.rect_filled(ui.max_rect(), 0.0, Color32::RED);
-
-                //     // const STRIDE: u32 = 1;
-                //     for (rect, pixel) in camera_map.pixels(self.stride) {
-                //         let color = self.tree.color(pixel).build().unwrap_or(Color32::MAGENTA);
-                //         // .expect("tree invariant not satisfied");
-
-                //         painter.rect_filled(rect, 0.0, color);
-                //     }
-                // }
-
-                // draw the fractal,
-                // but instead of drawing error magenta,
-                // draw pixels decreasing in stride
+                // draw the stuff
                 {
                     let painter = ui.painter_at(ui.max_rect());
 
-                    painter.rect_filled(ui.max_rect(), 0.0, Color32::RED);
-
-                    // don't draw pixels that will be completely overdrawn in the future
-                    let stride_pow_hi = {
-                        || {
-                            for stride_pow in
-                                (self.stride.ilog2()..(ui.max_rect().width() as u32).ilog2()).rev()
-                            {
-                                let stride = 1 << stride_pow;
-                                for (_, _, pixel) in camera_map.pixels(stride) {
-                                    if !self.tree.contains_sample(pixel) {
-                                        // +2 instead of +1 to fix a weird bug
-                                        return stride_pow + 2;
-                                    }
-                                }
-                            }
-                            // idk why this need + 1
-                            self.stride.ilog2() + 1
+                    // draw triangulation
+                    {
+                        const COLOR: Color32 = Color32::from_rgb(150, 150, 150);
+                        let triangles = quartic::triangulate(&self.points);
+                        for (i, j, k) in triangles {
+                            let a = camera_map.cam_to_egui(self.points[i]);
+                            let b = camera_map.cam_to_egui(self.points[j]);
+                            let c = camera_map.cam_to_egui(self.points[k]);
+                            painter.line_segment([a, b], (1.0, COLOR));
+                            painter.line_segment([b, c], (1.0, COLOR));
+                            painter.line_segment([c, a], (1.0, COLOR));
                         }
-                    }();
+                    }
 
-                    // for stride_pow in (self.stride.ilog2()..=stride_pow_hi).rev() {
-                    //     let stride = 1 << stride_pow;
-                    //     for (_, rect, pixel) in camera_map.pixels(stride) {
-                    //         if let Some(color) = self.tree.color_in_pixel(pixel).build() {
-                    //             painter.rect_filled(rect, 0.0, color);
-                    //         }
-                    //     }
-                    // }
-
-                    // for stride_pow in [1] {
-                    for stride_pow in (self.stride.ilog2()..=stride_pow_hi).rev() {
-                        let stride = 1 << stride_pow;
-                        assert_eq!(camera_map.rect.min, Pos2::ZERO);
-                        // let pow_2_camera_map = CameraMap::new(
-                        //     Rect {
-                        //         min: Pos2::ZERO,
-                        //         max: Pos2 {
-                        //             x: (1 << (camera_map.rect.max.x as i32).ilog2()) as f32,
-                        //             y: (1 << (camera_map.rect.max.y as i32).ilog2()) as f32,
-                        //         },
-                        //     },
-                        //     camera_map.camera,
-                        // );
-                        // let colors = self.tree.color_in_pixels(
-                        //     pow_2_camera_map.rect_to_window(pow_2_camera_map.rect),
-                        //     (pow_2_camera_map.x_to_real(stride as f32)
-                        //         - pow_2_camera_map.x_to_real(0.0))
-                        //         / 2.0,
-                        // );
-
-                        let colors = self.tree.color_in_pixels(
-                            camera_map.rect_to_window(camera_map.rect),
-                            (camera_map.egui_to_cam_x(stride as f32) - camera_map.egui_to_cam_x(0.0)) / 2.0,
-                            &camera_map,
-                            stride,
-                        );
-                        for ((row, col), rect, pixel) in camera_map.pixels(stride) {
-                            // for ((row, col), rect, pixel) in pow_2_camera_map.pixels(stride) {
-                            // if let Some(color) = colors[row][col].clone().build() {
-                            //     painter.rect_filled(rect, 0.0, color);
-                            // }
-                            // {
-                            //     let rad = pixel.rad();
-                            //     let actual = (camera_map.x_to_real(stride as f32)
-                            //         - camera_map.x_to_real(0.0))
-                            //         / 2.0;
-                            //     assert!((rad - actual).abs() < 1e-6);
-                            // }
-                            if let Some(color) = colors
-                                .get(row)
-                                .and_then(|line| line.get(col))
-                                .and_then(|c| c.clone().build())
-                            {
-                                // println!("here");
-                                // let Some(oracle) = self.tree.color_in_pixel(pixel).build() else {
-                                //     panic!()
-                                // };
-                                // assert_eq!(oracle, color);
-                                painter.rect_filled(rect, 0.0, color);
-                            } else if let Some(color) = self.tree.color_in_pixel(pixel).build() {
-                                // painter.rect_filled(rect, 0.0, color);
-                                painter.rect_filled(rect, 0.0, Color32::GREEN);
-                                // painter.rect_stroke(
-                                //     rect,
-                                //     0.0,
-                                //     egui::Stroke::new(0.5, Color32::MAGENTA),
-                                //     egui::StrokeKind::Middle,
-                                // );
-                            }
+                    // draw points
+                    for (i, &point) in self.points.iter().enumerate() {
+                        if Some(i) == highlighted_point {
+                            painter.circle_filled(
+                                camera_map.cam_to_egui(point),
+                                HIGHLIGHT_DIST,
+                                Color32::from_rgb(200, 200, 200),
+                            );
+                        } else {
+                            painter.circle_filled(
+                                camera_map.cam_to_egui(point),
+                                5.0,
+                                Color32::from_rgb(200, 200, 200),
+                            );
                         }
                     }
                 }
 
-                // // draw sequence of nodes that contain the mouse
-                // {
-                //     if let Some(mouse_pos) = ctx.input(|i| i.pointer.latest_pos()) {
-                //         fn draw_node(
-                //             node: &Tree,
-                //             depth: u32,
-                //             painter: &egui::Painter,
-                //             camera_map: &CameraMap,
-                //             real: f32,
-                //             imag: f32,
-                //         ) {
-                //             // println!("here");
-                //             painter.rect_stroke(
-                //                 camera_map.window_to_rect(node.window),
-                //                 0.0,
-                //                 egui::Stroke::new(
-                //                     3.0,
-                //                     // Color32::from_rgb(100, 100, 255u32.saturating_sub(5*depth) as u8),
-                //                     // Color32::from_rgb(100, 100, {
-                //                     //     let mut h = DefaultHasher::new();
-                //                     //     depth.hash(&mut h);
-                //                     //     h.finish() as u8
-                //                     // }),
-                //                     {
-                //                         let mut h = DefaultHasher::new();
-                //                         depth.hash(&mut h);
-                //                         let hash = h.finish();
-                //                         Color32::from_rgb(
-                //                             (hash >> 24) as u8,
-                //                             (hash >> 16) as u8,
-                //                             (hash >> 8) as u8,
-                //                         )
-                //                     },
-                //                 ),
-                //                 egui::StrokeKind::Inside,
-                //             );
-                //             let Some(children) = &node.children else {
-                //                 return;
-                //             };
-                //             for child in children {
-                //                 if child.window.contains(real, imag) {
-                //                     draw_node(child, depth + 1, painter, camera_map, real, imag);
-                //                 }
-                //             }
-                //         }
-                //         let (real, imag) = camera_map.pos_to_complex(mouse_pos);
-
-                //         draw_node(
-                //             &self.tree,
-                //             0,
-                //             &ui.painter_at(ui.max_rect()),
-                //             &camera_map,
-                //             real,
-                //             imag,
-                //         );
-                //         // panic!();
-                //     }
-                // }
-
-                // TODO: debug draw sequence of nodes that eventually have a child who's sample is inside the pixel the mouse is in
-
-                // // debug coloring of how many samples are inside each pixel
-                // {
-                //     let painter = ui.painter_at(ui.max_rect());
-                //     for (rect, pixel) in camera_map.pixels(self.stride) {
-                //         // let color = self.tree.color(pixel).unwrap_or(Color32::MAGENTA);
-                //         let count = self.tree.count_samples_strong(pixel);
-                //         painter.rect_filled(
-                //             rect,
-                //             0.0,
-                //             if count == 0 {
-                //                 Color32::MAGENTA
-                //             } else {
-                //                 Color32::from_gray((count * 50).min(255) as u8)
-                //             },
-                //         );
-                //     }
-                // }
-
-                // area is to allow the frame to be drawn on top of the fractal
+                // area is to allow the frame to be drawn on top
                 egui::Area::new(egui::Id::new("area"))
                     .constrain_to(ctx.screen_rect())
                     .anchor(egui::Align2::LEFT_TOP, egui::Vec2::ZERO)
@@ -496,16 +338,6 @@ impl eframe::App for App {
                                 .background_color(Color32::BLACK),
                             );
                         }
-
-                        // // view stuff
-                        // {
-                        //     ui.label(format!(
-                        //         "center: {:12.09} + {:12.09}i\nreal_radius: {:12.09}",
-                        //         self.camera.real_mid,
-                        //         self.camera.imag_mid,
-                        //         self.camera.real_rad,
-                        //     ));
-                        // }
                     });
             });
     }
@@ -521,25 +353,25 @@ mod tests {
         let camera = Camera::new(1.0, 2.0, 3.0);
         let camera_map = CameraMap::new(rect, camera);
 
-        assert_eq!(camera_map.camera.real_lo(), -2.0);
-        assert_eq!(camera_map.camera.real_hi(), 4.0);
-        assert_eq!(camera_map.imag_lo(), -4.0);
-        assert_eq!(camera_map.imag_hi(), 8.0);
+        assert_eq!(camera_map.camera.x_lo(), -2.0);
+        assert_eq!(camera_map.camera.x_hi(), 4.0);
+        assert_eq!(camera_map.y_lo(), -4.0);
+        assert_eq!(camera_map.y_hi(), 8.0);
 
-        assert!((0.0 - camera_map.real_to_x(-2.0)).abs() < 1e-4);
-        assert!((10.0 - camera_map.real_to_x(4.0)).abs() < 1e-4);
-        assert!((30.0 - camera_map.imag_to_y(8.0)).abs() < 1e-4);
-        assert!((50.0 - camera_map.imag_to_y(-4.0)).abs() < 1e-4);
+        assert!((0.0 - camera_map.cam_to_egui_x(-2.0)).abs() < 1e-4);
+        assert!((10.0 - camera_map.cam_to_egui_x(4.0)).abs() < 1e-4);
+        assert!((30.0 - camera_map.cam_to_egui_y(8.0)).abs() < 1e-4);
+        assert!((50.0 - camera_map.cam_to_egui_y(-4.0)).abs() < 1e-4);
 
         for (p, c) in [
-            (Pos2::new(0.0, 30.0), (-2.0, 8.0)),
-            (Pos2::new(0.0, 50.0), (-2.0, -4.0)),
-            (Pos2::new(10.0, 30.0), (4.0, 8.0)),
-            (Pos2::new(10.0, 50.0), (4.0, -4.0)),
+            (Pos2::new(0.0, 30.0), Point::new(-2.0, 8.0)),
+            (Pos2::new(0.0, 50.0), Point::new(-2.0, -4.0)),
+            (Pos2::new(10.0, 30.0), Point::new(4.0, 8.0)),
+            (Pos2::new(10.0, 50.0), Point::new(4.0, -4.0)),
         ] {
             let c_actual = camera_map.egui_to_cam(p);
-            assert!((c.0 - c_actual.0).abs() + (c.1 - c_actual.1).abs() < 1e-4);
-            let p_actual = camera_map.complex_to_pos(c);
+            assert!((c.x() - c_actual.x()).abs() + (c.y() - c_actual.y()).abs() < 1e-4);
+            let p_actual = camera_map.cam_to_egui(c);
             assert!((p - p_actual).length() < 1e-4);
         }
 
@@ -559,9 +391,7 @@ mod tests {
             Pos2::new(9.691, 42.933),
             Pos2::new(2.457, 30.097),
         ] {
-            assert!(
-                (pos - camera_map.complex_to_pos(camera_map.egui_to_cam(pos))).length() < 1e-4
-            );
+            assert!((pos - camera_map.cam_to_egui(camera_map.egui_to_cam(pos))).length() < 1e-4);
         }
         for c in [
             (-2.0, -1.0),
@@ -578,18 +408,20 @@ mod tests {
             (2.971, 4.047),
             (0.194, 2.966),
             (1.173, -0.435),
-        ] {
-            let actual = camera_map.egui_to_cam(camera_map.complex_to_pos(c));
-            assert!((c.0 - actual.0).abs() + (c.1 - actual.1).abs() < 1e-4);
+        ]
+        .map(Point::from)
+        {
+            let actual = camera_map.egui_to_cam(camera_map.cam_to_egui(c));
+            assert!((c.x() - actual.x()).abs() + (c.y() - actual.y()).abs() < 1e-4);
         }
 
-        let window = Window::new(
-            camera_map.camera.real_lo(),
-            camera_map.camera.real_hi(),
-            camera_map.imag_lo(),
-            camera_map.imag_hi(),
-        );
-        assert_eq!(camera_map.rect, camera_map.window_to_rect(window));
-        assert_eq!(window, camera_map.rect_to_window(rect));
+        // let window = Window::new(
+        //     camera_map.camera.x_lo(),
+        //     camera_map.camera.x_hi(),
+        //     camera_map.y_lo(),
+        //     camera_map.y_hi(),
+        // );
+        // assert_eq!(camera_map.rect, camera_map.window_to_rect(window));
+        // assert_eq!(window, camera_map.rect_to_window(rect));
     }
 }

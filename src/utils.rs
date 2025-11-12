@@ -1,0 +1,62 @@
+use crate::point::*;
+
+pub(crate) fn lerp_f32(lo: f32, hi: f32, t: f32) -> f32 {
+    assert!(lo < hi);
+    // assert!((0.0..=1.0).contains(&t));
+    lo + (hi - lo) * t
+}
+
+pub(crate) fn inv_lerp_f32(lo: f32, hi: f32, x: f32) -> f32 {
+    assert!(lo < hi);
+    // assert!((lo..=hi).contains(&x));
+    (x - lo) / (hi - lo)
+}
+
+pub(crate) fn lerp_f64(lo: f64, hi: f64, t: f64) -> f64 {
+    assert!(lo < hi);
+    // assert!((0.0..=1.0).contains(&t));
+    lo + (hi - lo) * t
+}
+
+pub(crate) fn inv_lerp_f64(lo: f64, hi: f64, x: f64) -> f64 {
+    assert!(lo < hi);
+    // assert!((lo..=hi).contains(&x));
+    (x - lo) / (hi - lo)
+}
+
+pub(crate) fn lerp_coord(lo: Coord, hi: Coord, t: Coord) -> Coord {
+    assert!(lo < hi);
+    // assert!((0.0..=1.0).contains(&t));
+    lo + (hi - lo) * t
+}
+
+pub(crate) fn inv_lerp_coord(lo: Coord, hi: Coord, x: Coord) -> Coord {
+    assert!(lo < hi);
+    // assert!((lo..=hi).contains(&x));
+    (x - lo) / (hi - lo)
+}
+
+// TODO: https://www.cs.cmu.edu/afs/cs/project/quake/public/code/predicates.c
+pub(crate) fn incircle(a: Point, b: Point, c: Point, p: Point) -> bool {
+    let det = (b.x() - a.x()) * (c.y() - a.y()) - (c.x() - a.x()) * (b.y() - a.y());
+    assert_ne!(det, 0.0, "collinear");
+    if det > 0.0 {
+        incircle_ccw(a, b, c, p)
+    } else {
+        !incircle_ccw(a, b, c, p)
+    }
+}
+
+pub(crate) fn incircle_ccw(a: Point, b: Point, c: Point, p: Point) -> bool {
+    let ax = a.x() - p.x();
+    let ay = a.y() - p.y();
+    let bx = b.x() - p.x();
+    let by = b.y() - p.y();
+    let cx = c.x() - p.x();
+    let cy = c.y() - p.y();
+
+    let det = (ax * ax + ay * ay) * (bx * cy - cx * by) - (bx * bx + by * by) * (ax * cy - cx * ay)
+        + (cx * cx + cy * cy) * (ax * by - bx * ay);
+
+    det > 0.0
+}
