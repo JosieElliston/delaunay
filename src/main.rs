@@ -1,6 +1,7 @@
 mod point;
 mod quartic;
 mod utils;
+mod tree;
 
 use std::iter::once;
 
@@ -134,6 +135,7 @@ struct App {
     dts: egui::util::History<f32>,
     points: Vec<Point>,
     drag_point: Option<usize>,
+    hist: HashMap<(usize, usize), usize>,
 }
 impl App {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
@@ -152,6 +154,7 @@ impl App {
                 })
                 .collect(),
             drag_point: None,
+            hist: HashMap::new(),
         }
     }
 }

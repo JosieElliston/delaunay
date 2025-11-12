@@ -1,6 +1,6 @@
 # README
 
-- https://www.desmos.com/calculator/mb0l9dzmws
+- <https://www.desmos.com/calculator/mb0l9dzmws>
 - discrete and computational geometry Satyan Devadoss
 
 ## visualization ideas
@@ -17,7 +17,7 @@
 
 ## alg ideas
 
-- consider a complete quadtree (all leaves are filled)
+- consider a filled / fully occupied quadtree
 - intersection of bounding boxes of tested triangles to refine search
 - if we go to the up-right quadtree, any triangle must be in the down-left most eventual child
     - not really

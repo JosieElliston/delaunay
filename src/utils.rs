@@ -41,7 +41,13 @@ pub(crate) fn canonicalize_edge(a_i: usize, b_i: usize) -> (usize, usize) {
     if a_i < b_i { (a_i, b_i) } else { (b_i, a_i) }
 }
 
-/// returns the smallest ordering st vertices are in CCW order
+pub(crate) fn is_ccw(a: Point, b: Point, c: Point) -> bool {
+    let det = (b.x() - a.x()) * (c.y() - a.y()) - (c.x() - a.x()) * (b.y() - a.y());
+    assert_ne!(det, 0.0, "collinear");
+    det > 0.0
+}
+
+/// the min index is at 0 and the the triangle is ccw
 pub(crate) fn canonicalize_tri(
     points: &[Point],
     a_i: usize,
@@ -49,36 +55,25 @@ pub(crate) fn canonicalize_tri(
     c_i: usize,
 ) -> (usize, usize, usize) {
     assert!(a_i != b_i && b_i != c_i && c_i != a_i);
-    let a = points[a_i];
-    let b = points[b_i];
-    let c = points[c_i];
 
-    let det = (b.x() - a.x()) * (c.y() - a.y()) - (c.x() - a.x()) * (b.y() - a.y());
-    assert_ne!(det, 0.0, "collinear");
-    if det > 0.0 {
-        // ccw
-        if a_i < b_i && a_i < c_i {
-            (a_i, b_i, c_i)
-        } else if b_i < a_i && b_i < c_i {
-            (b_i, c_i, a_i)
-        } else {
-            (c_i, a_i, b_i)
-        }
+    let (a_i, b_i, c_i) = if a_i < b_i && a_i < c_i {
+        (a_i, b_i, c_i)
+    } else if b_i < a_i && b_i < c_i {
+        (b_i, a_i, c_i)
     } else {
-        // cw
-        if a_i < b_i && a_i < c_i {
-            (a_i, c_i, b_i)
-        } else if b_i < a_i && b_i < c_i {
-            (b_i, a_i, c_i)
-        } else {
-            (c_i, b_i, a_i)
-        }
+        (c_i, a_i, b_i)
+    };
+
+    if is_ccw(points[a_i], points[b_i], points[c_i]) {
+        (a_i, b_i, c_i)
+    } else {
+        (a_i, c_i, b_i)
     }
 }
 
 /// returns whether the point is in the triangle
 /// probably should be ccw
-pub(crate) fn intriangle(a: Point, b: Point, c: Point, p: Point) -> bool {
+pub(crate) fn intriangle_ccw(a: Point, b: Point, c: Point, p: Point) -> bool {
     let abp = (b.x() - a.x()) * (p.y() - a.y()) - (b.y() - a.y()) * (p.x() - a.x());
     let bcp = (c.x() - b.x()) * (p.y() - b.y()) - (c.y() - b.y()) * (p.x() - b.x());
     let cap = (a.x() - c.x()) * (p.y() - c.y()) - (a.y() - c.y()) * (p.x() - c.x());
@@ -86,12 +81,18 @@ pub(crate) fn intriangle(a: Point, b: Point, c: Point, p: Point) -> bool {
     (abp >= 0.0 && bcp >= 0.0 && cap >= 0.0) || (abp <= 0.0 && bcp <= 0.0 && cap <= 0.0)
 }
 
+pub(crate) fn intriangle(a: Point, b: Point, c: Point, p: Point) -> bool {
+    if is_ccw(a, b, c) {
+        intriangle_ccw(a, b, c, p)
+    } else {
+        !intriangle_ccw(a, b, c, p)
+    }
+}
+
 // TODO: return Ordering instead of bool
 // TODO: https://www.cs.cmu.edu/afs/cs/project/quake/public/code/predicates.c
 pub(crate) fn incircle(a: Point, b: Point, c: Point, p: Point) -> bool {
-    let det = (b.x() - a.x()) * (c.y() - a.y()) - (c.x() - a.x()) * (b.y() - a.y());
-    assert_ne!(det, 0.0, "collinear");
-    if det > 0.0 {
+    if is_ccw(a, b, c) {
         incircle_ccw(a, b, c, p)
     } else {
         !incircle_ccw(a, b, c, p)

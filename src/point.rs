@@ -1,6 +1,7 @@
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 pub(crate) type Coord = f64;
+pub(crate) type PointId = usize;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Point {
@@ -8,16 +9,16 @@ pub(crate) struct Point {
     y: Coord,
 }
 impl Point {
-    pub(crate) fn new(x: Coord, y: Coord) -> Self {
+    pub(crate) const fn new(x: Coord, y: Coord) -> Self {
         assert!(!x.is_nan() && !y.is_nan());
         Self { x, y }
     }
 
-    pub(crate) fn x(&self) -> Coord {
+    pub(crate) const fn x(&self) -> Coord {
         self.x
     }
 
-    pub(crate) fn y(&self) -> Coord {
+    pub(crate) const fn y(&self) -> Coord {
         self.y
     }
 }
