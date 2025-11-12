@@ -526,6 +526,8 @@ impl eframe::App for App {
                             painter.line_segment([lm, rm], (1.0, SECONDARY_COLOR));
                         };
 
+                        draw_square(Point::new(1.0, 1.0), 1.0);
+
                         draw_square(Point::new(1.0 / 2.0, 1.0 / 2.0), 1.0 / 2.0);
                         draw_square(Point::new(3.0 / 4.0, 3.0 / 4.0), 1.0 / 4.0);
                         draw_square(Point::new(5.0 / 8.0, 5.0 / 8.0), 1.0 / 8.0);

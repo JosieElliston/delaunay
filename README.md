@@ -27,5 +27,5 @@
 - consider bounding boxes of tris / bounding boxes of circumcircles
 - look in a direction until we hit a node at the same level as us?
 - look out 2*node_width
-- maybe: if a path from a cell to another cell crosses >= 3 quadtree lines in the same direction, they can't be an edge
 - maybe: if a triangle is big enough, it must be acute
+- if a path from a cell to another cell crosses >= 3 quadtree lines in the same direction, they can't be an edge (i think this is correct)
