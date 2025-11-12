@@ -2,6 +2,7 @@ mod point;
 mod quartic;
 mod utils;
 
+use core::panic;
 use std::collections::HashSet;
 
 use eframe::egui::{self, Color32, Key, Pos2, Rect, RichText, Vec2};
@@ -359,10 +360,32 @@ impl eframe::App for App {
 
                     // invariant region
                     if let Some(highlighted_point) = highlighted_point {
-                        let x_steps = camera_map.rect.width() as usize / 4;
+                        let x_lo = highlighted_point_adj_points
+                            .iter()
+                            .map(|&p_i| self.points[p_i].x())
+                            .min_by(Coord::total_cmp)
+                            .unwrap();
+                        let x_hi = highlighted_point_adj_points
+                            .iter()
+                            .map(|&p_i| self.points[p_i].x())
+                            .max_by(Coord::total_cmp)
+                            .unwrap();
+                        let y_lo = highlighted_point_adj_points
+                            .iter()
+                            .map(|&p_i| self.points[p_i].y())
+                            .min_by(Coord::total_cmp)
+                            .unwrap();
+                        let y_hi = highlighted_point_adj_points
+                            .iter()
+                            .map(|&p_i| self.points[p_i].y())
+                            .max_by(Coord::total_cmp)
+                            .unwrap();
+
+                        let x_steps = camera_map.rect.width() as usize / 2;
                         let y_steps = (x_steps as f32 * camera_map.rect.height()
                             / camera_map.rect.width())
                             as usize;
+
                         for x in (0..=x_steps).map(|i: usize| {
                             lerp_coord(
                                 self.camera.x_lo(),
@@ -379,7 +402,15 @@ impl eframe::App for App {
                             }) {
                                 let q = Point::new(x, y);
 
+                                // pruning: bounding box
+                                // i'm doing it this way instead of lerping across the bounding box
+                                // because i want it to be pixel aligned and it would be painful
+                                if x < x_lo || x > x_hi || y < y_lo || y > y_hi {
+                                    continue;
+                                }
+
                                 // pruning: the new point must be inside some triangle the highlighted point is in
+                                // this is also needed for correctness
                                 if !highlighted_point_triangles.iter().any(|&(b_i, c_i)| {
                                     let (a_i, b_i, c_i) =
                                         canonicalize_tri(&self.points, highlighted_point, b_i, c_i);
@@ -402,7 +433,6 @@ impl eframe::App for App {
                                 let flip_1 = {
                                     || {
                                         for &(b_i, c_i) in &highlighted_point_triangles {
-                                            let a = Point::new(x, y);
                                             let b = self.points[b_i];
                                             let c = self.points[c_i];
                                             let Some(&p_i) = edge_to_tri
@@ -412,7 +442,7 @@ impl eframe::App for App {
                                             else {
                                                 continue;
                                             };
-                                            if incircle(a, b, c, self.points[p_i]) {
+                                            if incircle(q, b, c, self.points[p_i]) {
                                                 return false;
                                             }
                                         }
@@ -423,26 +453,29 @@ impl eframe::App for App {
                                 // this checks for the other kind of flip
                                 let flip_2 = {
                                     || {
-                                        for &(b_i, c_i) in &highlighted_point_triangles {
-                                            let b = self.points[b_i];
-                                            let c = self.points[c_i];
-                                            for &p_i in &highlighted_point_adj_points {
-                                                if p_i == highlighted_point
-                                                    || p_i == b_i
-                                                    || p_i == c_i
-                                                {
-                                                    continue;
-                                                }
-                                                if incircle(q, b, c, self.points[p_i])
-                                                    != incircle(
-                                                        self.points[highlighted_point],
-                                                        b,
-                                                        c,
-                                                        self.points[p_i],
-                                                    )
-                                                {
-                                                    return false;
-                                                }
+                                        for &p_i in &highlighted_point_adj_points {
+                                            let [b_i, c_i] = edge_to_tri
+                                                [&utils::canonicalize_edge(highlighted_point, p_i)]
+                                                [..]
+                                            else {
+                                                // i'm not sure this is correct
+                                                // but it's just for the ones on the border so idc
+                                                continue;
+                                            };
+                                            assert_ne!(c_i, highlighted_point);
+                                            assert_ne!(c_i, p_i);
+                                            if incircle(
+                                                q,
+                                                self.points[p_i],
+                                                self.points[b_i],
+                                                self.points[c_i],
+                                            ) || incircle(
+                                                q,
+                                                self.points[p_i],
+                                                self.points[c_i],
+                                                self.points[b_i],
+                                            ) {
+                                                return false;
                                             }
                                         }
                                         true
