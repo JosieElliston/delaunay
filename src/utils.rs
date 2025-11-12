@@ -36,6 +36,42 @@ pub(crate) fn inv_lerp_coord(lo: Coord, hi: Coord, x: Coord) -> Coord {
     (x - lo) / (hi - lo)
 }
 
+// returns the smallest ordering st vertices are in CCW order
+pub(crate) fn canonicalize(
+    points: &[Point],
+    a_i: usize,
+    b_i: usize,
+    c_i: usize,
+) -> (usize, usize, usize) {
+    assert!(a_i != b_i && b_i != c_i && c_i != a_i);
+    let a = points[a_i];
+    let b = points[b_i];
+    let c = points[c_i];
+
+    let det = (b.x() - a.x()) * (c.y() - a.y()) - (c.x() - a.x()) * (b.y() - a.y());
+    assert_ne!(det, 0.0, "collinear");
+    if det > 0.0 {
+        // ccw
+        if a_i < b_i && a_i < c_i {
+            (a_i, b_i, c_i)
+        } else if b_i < a_i && b_i < c_i {
+            (b_i, c_i, a_i)
+        } else {
+            (c_i, a_i, b_i)
+        }
+    } else {
+        // cw
+        if a_i < b_i && a_i < c_i {
+            (a_i, c_i, b_i)
+        } else if b_i < a_i && b_i < c_i {
+            (b_i, a_i, c_i)
+        } else {
+            (c_i, b_i, a_i)
+        }
+    }
+}
+
+// TODO: return Ordering instead of bool
 // TODO: https://www.cs.cmu.edu/afs/cs/project/quake/public/code/predicates.c
 pub(crate) fn incircle(a: Point, b: Point, c: Point, p: Point) -> bool {
     let det = (b.x() - a.x()) * (c.y() - a.y()) - (c.x() - a.x()) * (b.y() - a.y());

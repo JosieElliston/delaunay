@@ -1,6 +1,5 @@
 mod point;
 mod quartic;
-mod triangulation;
 mod utils;
 
 use eframe::egui::{self, Color32, Key, Pos2, Rect, RichText, Vec2};
@@ -157,7 +156,7 @@ struct App {
 impl App {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         Self {
-            camera: Camera::new(0.5, 0.5, 0.5),
+            camera: Camera::new(0.5, 0.5, 0.7),
             velocity: Vec2::ZERO,
             dts: egui::util::History::new(1..256, 1.0),
             points: [
@@ -269,14 +268,20 @@ impl eframe::App for App {
                     if r.contains_pointer()
                         && let Some(mouse_pos) = ctx.input(|i| i.pointer.latest_pos())
                     {
-                        let mouse = mouse_pos - rect.center();
+                        // if we've hovering on a point, zoom towards that point instead of the mouse
+                        let center = if let Some(highlighted_point) = highlighted_point {
+                            camera_map.cam_to_egui(self.points[highlighted_point])
+                        } else {
+                            mouse_pos
+                        } - rect.center();
                         let zoom = ctx.input(|i| (i.smooth_scroll_delta.y / 300.0).exp());
-                        self.camera -= pan_offset(-mouse, self.camera.x_rad as _);
+                        self.camera -= pan_offset(-center, self.camera.x_rad as _);
                         self.camera.x_rad /= zoom as Coord;
-                        self.camera -= pan_offset(mouse, self.camera.x_rad as _);
+                        self.camera -= pan_offset(center, self.camera.x_rad as _);
                     }
                 }
                 let camera_map = CameraMap::new(ui.max_rect(), self.camera);
+                let triangles = quartic::triangulate(&self.points);
 
                 // drawing
                 {
@@ -284,7 +289,7 @@ impl eframe::App for App {
 
                     // draw debug ~quadtree lines
                     {
-                        let draw = |mid: Point, rad: Coord| {
+                        let draw_square = |mid: Point, rad: Coord| {
                             const PRIMARY_COLOR: Color32 = Color32::from_rgb(10, 10, 255);
                             const SECONDARY_COLOR: Color32 = Color32::from_rgb(100, 100, 200);
 
@@ -311,19 +316,131 @@ impl eframe::App for App {
                             painter.line_segment([lm, rm], (1.0, SECONDARY_COLOR));
                         };
 
-                        draw(Point::new(1.0 / 2.0, 1.0 / 2.0), 1.0 / 2.0);
-                        draw(Point::new(3.0 / 4.0, 3.0 / 4.0), 1.0 / 4.0);
-                        draw(Point::new(5.0 / 8.0, 5.0 / 8.0), 1.0 / 8.0);
+                        draw_square(Point::new(1.0 / 2.0, 1.0 / 2.0), 1.0 / 2.0);
+                        draw_square(Point::new(3.0 / 4.0, 3.0 / 4.0), 1.0 / 4.0);
+                        draw_square(Point::new(5.0 / 8.0, 5.0 / 8.0), 1.0 / 8.0);
+                    }
+
+                    // invariant region
+                    if let Some(highlighted_point) = highlighted_point {
+                        const STEPS: usize = 300;
+                        for x in (0..=STEPS).map(|i: usize| {
+                            lerp_coord(
+                                self.camera.x_lo(),
+                                self.camera.x_hi(),
+                                i as Coord / STEPS as Coord,
+                            )
+                        }) {
+                            for y in (0..=STEPS).map(|i: usize| {
+                                lerp_coord(
+                                    camera_map.y_lo(),
+                                    camera_map.y_hi(),
+                                    i as Coord / STEPS as Coord,
+                                )
+                            }) {
+                                let q = Point::new(x, y);
+                                // for (b_i, c_i) in triangles.iter().filter_map(|&(a_i, b_i, c_i)| {
+                                //     match highlighted_point {
+                                //         _ if a_i == highlighted_point => Some((b_i, c_i)),
+                                //         _ if b_i == highlighted_point => Some((c_i, a_i)),
+                                //         _ if c_i == highlighted_point => Some((a_i, b_i)),
+                                //         _ => None,
+                                //     }
+                                // }) {
+                                //     let a = Point::new(x, y);
+                                //     let b = self.points[b_i];
+                                //     let c = self.points[c_i];
+                                //     // rust doesn't have no break
+                                //     if {
+                                //         || {
+                                //             for (p_i, &p) in self.points.iter().enumerate() {
+                                //                 if p_i == highlighted_point
+                                //                     || p_i == b_i
+                                //                     || p_i == c_i
+                                //                 {
+                                //                     continue;
+                                //                 }
+                                //                 if incircle_ccw(a, b, c, p) {
+                                //                     return false;
+                                //                 }
+                                //             }
+                                //             true
+                                //         }
+                                //     }() {
+                                //         painter.circle_filled(
+                                //             camera_map.cam_to_egui(a),
+                                //             1.0,
+                                //             Color32::from_rgb(100, 200, 100),
+                                //         );
+                                //     }
+                                // }
+                                // if {
+                                //     || {
+                                //         for a_i in 0..self.points.len() {
+                                //             for b_i in a_i + 1..self.points.len() {
+                                //                 for c_i in b_i + 1..self.points.len() {
+                                //                     if a_i == highlighted_point
+                                //                         || b_i == highlighted_point
+                                //                         || c_i == highlighted_point
+                                //                     {
+                                //                         continue;
+                                //                     }
+                                //                     let a = self.points[a_i];
+                                //                     let b = self.points[b_i];
+                                //                     let c: Point = self.points[c_i];
+                                //                     if incircle(a, b, c, q)
+                                //                         != incircle(
+                                //                             a,
+                                //                             b,
+                                //                             c,
+                                //                             self.points[highlighted_point],
+                                //                         )
+                                //                     {
+                                //                         return false;
+                                //                     }
+                                //                 }
+                                //             }
+                                //         }
+                                //         true
+                                //     }
+                                // }() {
+                                //     painter.circle_filled(
+                                //         camera_map.cam_to_egui(q),
+                                //         (camera_map.cam_to_egui_x(1.0 / STEPS as Coord)
+                                //             - camera_map.cam_to_egui_x(0.0)) / 2.0,
+                                //         Color32::from_rgb(100, 200, 100),
+                                //     );
+                                // }
+                                let mut points_prime = self.points.clone();
+                                points_prime[highlighted_point] = q;
+                                if triangles == quartic::triangulate(&points_prime) {
+                                    // painter.circle_filled(
+                                    //     camera_map.cam_to_egui(q),
+                                    //     (camera_map.cam_to_egui_x(1.0 / STEPS as Coord)
+                                    //         - camera_map.cam_to_egui_x(0.0))
+                                    //         / 2.0,
+                                    //     Color32::from_rgb(100, 200, 100),
+                                    // );
+                                    painter.rect_filled(
+                                        Rect::from_center_size(
+                                            camera_map.cam_to_egui(q),
+                                            camera_map.rect.size() / STEPS as f32,
+                                        ),
+                                        0.0,
+                                        Color32::from_rgb(100, 200, 100),
+                                    );
+                                }
+                            }
+                        }
                     }
 
                     // draw triangulation
                     {
                         const COLOR: Color32 = Color32::from_rgb(150, 150, 150);
-                        let triangles = quartic::triangulate(&self.points);
-                        for (i, j, k) in triangles {
-                            let a = camera_map.cam_to_egui(self.points[i]);
-                            let b = camera_map.cam_to_egui(self.points[j]);
-                            let c = camera_map.cam_to_egui(self.points[k]);
+                        for (a_i, b_i, c_i) in triangles {
+                            let a = camera_map.cam_to_egui(self.points[a_i]);
+                            let b = camera_map.cam_to_egui(self.points[b_i]);
+                            let c = camera_map.cam_to_egui(self.points[c_i]);
                             painter.line_segment([a, b], (1.0, COLOR));
                             painter.line_segment([b, c], (1.0, COLOR));
                             painter.line_segment([c, a], (1.0, COLOR));
