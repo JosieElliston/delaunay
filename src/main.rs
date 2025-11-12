@@ -161,20 +161,16 @@ impl App {
             camera: Camera::new(0.5, 0.5, 0.7),
             velocity: Vec2::ZERO,
             dts: egui::util::History::new(1..256, 1.0),
-            points: [
-                (0.695, 0.5075),
-                (0.60425, 0.59325),
-                (0.51, 0.7335),
-                (0.6975, 0.72),
-                (0.8855, 0.90325),
-                (0.80825, 0.648),
-                (0.68925, 0.7925),
-                (0.1325, 0.855),
-                (0.959, 0.0125),
-                (1.015, 0.516),
-            ]
-            .map(Point::from)
-            .to_vec(),
+            points: std::fs::read_to_string("points.csv")
+                .unwrap()
+                .lines()
+                .filter_map(|line| {
+                    let mut split = line.split(',');
+                    let x: f32 = split.next()?.trim().parse().ok()?;
+                    let y: f32 = split.next()?.trim().parse().ok()?;
+                    Some(Point::new(x as Coord, y as Coord))
+                })
+                .collect(),
             drag_point: None,
         }
     }
@@ -191,6 +187,28 @@ impl eframe::App for App {
                 );
 
                 let camera_map = CameraMap::new(ui.max_rect(), self.camera);
+
+                // add point on right click
+                // TODO: maybe i'm supposed to check if we're in the ui
+                {
+                    if ctx.input(|i| i.pointer.secondary_pressed()) {
+                        self.points.push(
+                            camera_map.egui_to_cam(ctx.input(|i| i.pointer.latest_pos().unwrap())),
+                        );
+                    }
+                }
+
+                // save on s press
+                {
+                    if ctx.input(|i| i.key_pressed(Key::S)) {
+                        let mut s = String::new();
+                        for point in &self.points {
+                            let (x, y): (Coord, Coord) = (*point).into();
+                            s += &format!("{},{}\n", x, y);
+                        }
+                        std::fs::write("points.csv", s).expect("unable to write file");
+                    }
+                }
 
                 // this is in egui coords
                 const HIGHLIGHT_DIST: f32 = 10.0;
@@ -215,6 +233,27 @@ impl eframe::App for App {
                                 .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
                                 .map(|(i, _)| i)
                         })
+                    }
+                };
+
+                // delete point
+                let highlighted_point = {
+                    if let Some(highlighted_point) = highlighted_point
+                        && (ctx.input(|i| i.key_pressed(Key::Delete))
+                            || ctx.input(|i| i.key_pressed(Key::Backspace)))
+                    {
+                        self.points.remove(highlighted_point);
+                        // TODO: this is evil
+                        if let Some(drag_point) = self.drag_point {
+                            if drag_point == highlighted_point {
+                                self.drag_point = None;
+                            } else if drag_point > highlighted_point {
+                                self.drag_point = Some(drag_point - 1);
+                            }
+                        }
+                        None
+                    } else {
+                        highlighted_point
                     }
                 };
 
@@ -317,40 +356,6 @@ impl eframe::App for App {
                 // drawing
                 {
                     let painter = ui.painter_at(ui.max_rect());
-
-                    // draw debug ~quadtree lines
-                    {
-                        let draw_square = |mid: Point, rad: Coord| {
-                            const PRIMARY_COLOR: Color32 = Color32::from_rgb(10, 10, 255);
-                            const SECONDARY_COLOR: Color32 = Color32::from_rgb(100, 100, 200);
-
-                            let ul =
-                                camera_map.cam_to_egui(Point::new(mid.x() - rad, mid.y() + rad));
-                            let ur =
-                                camera_map.cam_to_egui(Point::new(mid.x() + rad, mid.y() + rad));
-                            let dl =
-                                camera_map.cam_to_egui(Point::new(mid.x() - rad, mid.y() - rad));
-                            let dr =
-                                camera_map.cam_to_egui(Point::new(mid.x() + rad, mid.y() - rad));
-
-                            painter.line_segment([ul, ur], (1.0, PRIMARY_COLOR));
-                            painter.line_segment([ur, dr], (1.0, PRIMARY_COLOR));
-                            painter.line_segment([dr, dl], (1.0, PRIMARY_COLOR));
-                            painter.line_segment([dl, ul], (1.0, PRIMARY_COLOR));
-
-                            let um = camera_map.cam_to_egui(Point::new(mid.x(), mid.y() + rad));
-                            let dm = camera_map.cam_to_egui(Point::new(mid.x(), mid.y() - rad));
-                            let lm = camera_map.cam_to_egui(Point::new(mid.x() - rad, mid.y()));
-                            let rm = camera_map.cam_to_egui(Point::new(mid.x() + rad, mid.y()));
-
-                            painter.line_segment([um, dm], (1.0, SECONDARY_COLOR));
-                            painter.line_segment([lm, rm], (1.0, SECONDARY_COLOR));
-                        };
-
-                        draw_square(Point::new(1.0 / 2.0, 1.0 / 2.0), 1.0 / 2.0);
-                        draw_square(Point::new(3.0 / 4.0, 3.0 / 4.0), 1.0 / 4.0);
-                        draw_square(Point::new(5.0 / 8.0, 5.0 / 8.0), 1.0 / 8.0);
-                    }
 
                     // invariant region
                     if let Some(highlighted_point) = highlighted_point {
@@ -466,13 +471,51 @@ impl eframe::App for App {
                                         match (flip_1, flip_2) {
                                             (true, true) => Color32::from_rgb(100, 100, 100),
                                             (true, false) => Color32::from_rgb(50, 100, 50),
-                                            (false, true) => Color32::from_rgb(100, 50,50),
+                                            (false, true) => Color32::from_rgb(100, 50, 50),
                                             (false, false) => unreachable!(),
                                         },
                                     );
                                 }
                             }
                         }
+                    }
+
+                    // draw debug ~quadtree lines
+                    {
+                        let draw_square = |mid: Point, rad: Coord| {
+                            const PRIMARY_COLOR: Color32 = Color32::from_rgb(10, 10, 255);
+                            const SECONDARY_COLOR: Color32 = Color32::from_rgb(100, 100, 200);
+
+                            let ul =
+                                camera_map.cam_to_egui(Point::new(mid.x() - rad, mid.y() + rad));
+                            let ur =
+                                camera_map.cam_to_egui(Point::new(mid.x() + rad, mid.y() + rad));
+                            let dl =
+                                camera_map.cam_to_egui(Point::new(mid.x() - rad, mid.y() - rad));
+                            let dr =
+                                camera_map.cam_to_egui(Point::new(mid.x() + rad, mid.y() - rad));
+
+                            painter.line_segment([ul, ur], (1.0, PRIMARY_COLOR));
+                            painter.line_segment([ur, dr], (1.0, PRIMARY_COLOR));
+                            painter.line_segment([dr, dl], (1.0, PRIMARY_COLOR));
+                            painter.line_segment([dl, ul], (1.0, PRIMARY_COLOR));
+
+                            let um = camera_map.cam_to_egui(Point::new(mid.x(), mid.y() + rad));
+                            let dm = camera_map.cam_to_egui(Point::new(mid.x(), mid.y() - rad));
+                            let lm = camera_map.cam_to_egui(Point::new(mid.x() - rad, mid.y()));
+                            let rm = camera_map.cam_to_egui(Point::new(mid.x() + rad, mid.y()));
+
+                            painter.line_segment([um, dm], (1.0, SECONDARY_COLOR));
+                            painter.line_segment([lm, rm], (1.0, SECONDARY_COLOR));
+                        };
+
+                        draw_square(Point::new(1.0 / 2.0, 1.0 / 2.0), 1.0 / 2.0);
+                        draw_square(Point::new(3.0 / 4.0, 3.0 / 4.0), 1.0 / 4.0);
+                        draw_square(Point::new(5.0 / 8.0, 5.0 / 8.0), 1.0 / 8.0);
+
+                        draw_square(Point::new(3.0 / 2.0, 1.0 / 2.0), 1.0 / 2.0);
+                        draw_square(Point::new(5.0 / 4.0, 1.0 / 4.0), 1.0 / 4.0);
+                        draw_square(Point::new(5.0 / 4.0, 3.0 / 4.0), 1.0 / 4.0);
                     }
 
                     // draw triangulation
