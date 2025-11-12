@@ -2,6 +2,8 @@ mod point;
 mod quartic;
 mod utils;
 
+use std::collections::HashSet;
+
 use eframe::egui::{self, Color32, Key, Pos2, Rect, RichText, Vec2};
 
 use crate::point::*;
@@ -282,6 +284,35 @@ impl eframe::App for App {
                 }
                 let camera_map = CameraMap::new(ui.max_rect(), self.camera);
                 let triangles = quartic::triangulate(&self.points);
+                let highlighted_point_triangles = triangles
+                    .iter()
+                    .filter_map(|&(a_i, b_i, c_i)| match highlighted_point {
+                        Some(i) if a_i == i => Some((b_i, c_i)),
+                        Some(i) if b_i == i => Some((c_i, a_i)),
+                        Some(i) if c_i == i => Some((a_i, b_i)),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                let edge_to_tri = {
+                    let mut map = std::collections::HashMap::new();
+                    for &(a_i, b_i, c_i) in &triangles {
+                        map.entry(utils::canonicalize_edge(a_i, b_i))
+                            .or_insert_with(Vec::new)
+                            .push(c_i);
+                        map.entry(utils::canonicalize_edge(b_i, c_i))
+                            .or_insert_with(Vec::new)
+                            .push(a_i);
+                        map.entry(utils::canonicalize_edge(c_i, a_i))
+                            .or_insert_with(Vec::new)
+                            .push(b_i);
+                    }
+                    map
+                };
+                let highlighted_point_adj_points: HashSet<usize> = HashSet::from_iter(
+                    highlighted_point_triangles
+                        .iter()
+                        .flat_map(|&(b_i, c_i)| [b_i, c_i]),
+                );
 
                 // drawing
                 {
@@ -323,111 +354,121 @@ impl eframe::App for App {
 
                     // invariant region
                     if let Some(highlighted_point) = highlighted_point {
-                        const STEPS: usize = 300;
-                        for x in (0..=STEPS).map(|i: usize| {
+                        let x_steps = camera_map.rect.width() as usize / 4;
+                        let y_steps = (x_steps as f32 * camera_map.rect.height()
+                            / camera_map.rect.width())
+                            as usize;
+                        for x in (0..=x_steps).map(|i: usize| {
                             lerp_coord(
                                 self.camera.x_lo(),
                                 self.camera.x_hi(),
-                                i as Coord / STEPS as Coord,
+                                i as Coord / x_steps as Coord,
                             )
                         }) {
-                            for y in (0..=STEPS).map(|i: usize| {
+                            for y in (0..=y_steps).map(|i: usize| {
                                 lerp_coord(
                                     camera_map.y_lo(),
                                     camera_map.y_hi(),
-                                    i as Coord / STEPS as Coord,
+                                    i as Coord / y_steps as Coord,
                                 )
                             }) {
                                 let q = Point::new(x, y);
-                                // for (b_i, c_i) in triangles.iter().filter_map(|&(a_i, b_i, c_i)| {
-                                //     match highlighted_point {
-                                //         _ if a_i == highlighted_point => Some((b_i, c_i)),
-                                //         _ if b_i == highlighted_point => Some((c_i, a_i)),
-                                //         _ if c_i == highlighted_point => Some((a_i, b_i)),
-                                //         _ => None,
-                                //     }
-                                // }) {
-                                //     let a = Point::new(x, y);
-                                //     let b = self.points[b_i];
-                                //     let c = self.points[c_i];
-                                //     // rust doesn't have no break
-                                //     if {
-                                //         || {
-                                //             for (p_i, &p) in self.points.iter().enumerate() {
-                                //                 if p_i == highlighted_point
-                                //                     || p_i == b_i
-                                //                     || p_i == c_i
-                                //                 {
-                                //                     continue;
-                                //                 }
-                                //                 if incircle_ccw(a, b, c, p) {
-                                //                     return false;
-                                //                 }
-                                //             }
-                                //             true
-                                //         }
-                                //     }() {
-                                //         painter.circle_filled(
-                                //             camera_map.cam_to_egui(a),
-                                //             1.0,
-                                //             Color32::from_rgb(100, 200, 100),
-                                //         );
-                                //     }
-                                // }
-                                // if {
-                                //     || {
-                                //         for a_i in 0..self.points.len() {
-                                //             for b_i in a_i + 1..self.points.len() {
-                                //                 for c_i in b_i + 1..self.points.len() {
-                                //                     if a_i == highlighted_point
-                                //                         || b_i == highlighted_point
-                                //                         || c_i == highlighted_point
-                                //                     {
-                                //                         continue;
-                                //                     }
-                                //                     let a = self.points[a_i];
-                                //                     let b = self.points[b_i];
-                                //                     let c: Point = self.points[c_i];
-                                //                     if incircle(a, b, c, q)
-                                //                         != incircle(
-                                //                             a,
-                                //                             b,
-                                //                             c,
-                                //                             self.points[highlighted_point],
-                                //                         )
-                                //                     {
-                                //                         return false;
-                                //                     }
-                                //                 }
-                                //             }
-                                //         }
-                                //         true
-                                //     }
-                                // }() {
-                                //     painter.circle_filled(
-                                //         camera_map.cam_to_egui(q),
-                                //         (camera_map.cam_to_egui_x(1.0 / STEPS as Coord)
-                                //             - camera_map.cam_to_egui_x(0.0)) / 2.0,
-                                //         Color32::from_rgb(100, 200, 100),
-                                //     );
-                                // }
-                                let mut points_prime = self.points.clone();
-                                points_prime[highlighted_point] = q;
-                                if triangles == quartic::triangulate(&points_prime) {
-                                    // painter.circle_filled(
-                                    //     camera_map.cam_to_egui(q),
-                                    //     (camera_map.cam_to_egui_x(1.0 / STEPS as Coord)
-                                    //         - camera_map.cam_to_egui_x(0.0))
-                                    //         / 2.0,
-                                    //     Color32::from_rgb(100, 200, 100),
-                                    // );
+
+                                // pruning: the new point must be inside some triangle the highlighted point is in
+                                if !highlighted_point_triangles.iter().any(|&(b_i, c_i)| {
+                                    let (a_i, b_i, c_i) =
+                                        canonicalize_tri(&self.points, highlighted_point, b_i, c_i);
+                                    let a = self.points[a_i];
+                                    let b = self.points[b_i];
+                                    let c = self.points[c_i];
+                                    intriangle(a, b, c, q)
+                                }) {
+                                    continue;
+                                }
+
+                                // oracle
+                                {
+                                    // let mut points_prime = self.points.clone();
+                                    // points_prime[highlighted_point] = q;
+                                    // let oracle = triangles == quartic::triangulate(&points_prime);
+                                }
+
+                                // this only checks for one kind of flip
+                                let flip_1 = {
+                                    || {
+                                        for &(b_i, c_i) in &highlighted_point_triangles {
+                                            let a = Point::new(x, y);
+                                            let b = self.points[b_i];
+                                            let c = self.points[c_i];
+                                            let Some(&p_i) = edge_to_tri
+                                                [&utils::canonicalize_edge(b_i, c_i)]
+                                                .iter()
+                                                .find(|&&p_i| p_i != highlighted_point)
+                                            else {
+                                                continue;
+                                            };
+                                            if incircle(a, b, c, self.points[p_i]) {
+                                                return false;
+                                            }
+                                        }
+                                        true
+                                    }
+                                }();
+
+                                // this checks for the other kind of flip
+                                let flip_2 = {
+                                    || {
+                                        for &(b_i, c_i) in &highlighted_point_triangles {
+                                            let b = self.points[b_i];
+                                            let c = self.points[c_i];
+                                            for &p_i in &highlighted_point_adj_points {
+                                                if p_i == highlighted_point
+                                                    || p_i == b_i
+                                                    || p_i == c_i
+                                                {
+                                                    continue;
+                                                }
+                                                if incircle(q, b, c, self.points[p_i])
+                                                    != incircle(
+                                                        self.points[highlighted_point],
+                                                        b,
+                                                        c,
+                                                        self.points[p_i],
+                                                    )
+                                                {
+                                                    return false;
+                                                }
+                                            }
+                                        }
+                                        true
+                                    }
+                                }();
+
+                                // if (oracle, flip_1, flip_2) != (false, false, false) {
+                                if (flip_1, flip_2) != (false, false) {
                                     painter.rect_filled(
                                         Rect::from_center_size(
                                             camera_map.cam_to_egui(q),
-                                            camera_map.rect.size() / STEPS as f32,
+                                            camera_map.rect.width()
+                                                * Vec2::splat(1.0 / x_steps as f32),
                                         ),
                                         0.0,
-                                        Color32::from_rgb(100, 200, 100),
+                                        // match (oracle, flip_1, flip_2) {
+                                        //     (true, true, true) => Color32::from_rgb(255, 255, 255),
+                                        //     (true, false, true)
+                                        //     | (true, true, false)
+                                        //     | (true, false, false) => Color32::from_rgb(255, 0, 0),
+                                        //     (false, true, true) => Color32::from_rgb(200, 0, 0),
+                                        //     (false, true, false) => Color32::from_rgb(0, 255, 0),
+                                        //     (false, false, true) => Color32::from_rgb(0, 0, 255),
+                                        //     (false, false, false) => unreachable!(),
+                                        // },
+                                        match (flip_1, flip_2) {
+                                            (true, true) => Color32::from_rgb(100, 100, 100),
+                                            (true, false) => Color32::from_rgb(50, 100, 50),
+                                            (false, true) => Color32::from_rgb(100, 50,50),
+                                            (false, false) => unreachable!(),
+                                        },
                                     );
                                 }
                             }

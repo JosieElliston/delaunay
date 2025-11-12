@@ -36,8 +36,13 @@ pub(crate) fn inv_lerp_coord(lo: Coord, hi: Coord, x: Coord) -> Coord {
     (x - lo) / (hi - lo)
 }
 
-// returns the smallest ordering st vertices are in CCW order
-pub(crate) fn canonicalize(
+pub(crate) fn canonicalize_edge(a_i: usize, b_i: usize) -> (usize, usize) {
+    assert!(a_i != b_i);
+    if a_i < b_i { (a_i, b_i) } else { (b_i, a_i) }
+}
+
+/// returns the smallest ordering st vertices are in CCW order
+pub(crate) fn canonicalize_tri(
     points: &[Point],
     a_i: usize,
     b_i: usize,
@@ -69,6 +74,16 @@ pub(crate) fn canonicalize(
             (c_i, b_i, a_i)
         }
     }
+}
+
+/// returns whether the point is in the triangle
+/// probably should be ccw
+pub(crate) fn intriangle(a: Point, b: Point, c: Point, p: Point) -> bool {
+    let abp = (b.x() - a.x()) * (p.y() - a.y()) - (b.y() - a.y()) * (p.x() - a.x());
+    let bcp = (c.x() - b.x()) * (p.y() - b.y()) - (c.y() - b.y()) * (p.x() - b.x());
+    let cap = (a.x() - c.x()) * (p.y() - c.y()) - (a.y() - c.y()) * (p.x() - c.x());
+
+    (abp >= 0.0 && bcp >= 0.0 && cap >= 0.0) || (abp <= 0.0 && bcp <= 0.0 && cap <= 0.0)
 }
 
 // TODO: return Ordering instead of bool
