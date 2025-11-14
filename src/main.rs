@@ -9,13 +9,14 @@ use std::hash::Hash;
 use std::iter::once;
 use std::time::Instant;
 
-use eframe::egui::ahash::{HashMap, HashMapExt, HashSet};
+use eframe::egui::ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use eframe::egui::{self, Color32, Key, Pos2, Rect, RichText, Vec2};
 use rand::SeedableRng;
 
 use crate::point::*;
 use crate::tree::*;
 use crate::utils::*;
+use crate::v1::{AlgNode, AlgTree};
 
 fn main() {
     // std::env::set_var("RUST_BACKTRACE", "1");
@@ -155,8 +156,8 @@ struct App {
     points: Vec<Point>,
     // tree: FilledTree,
     tree_shape: TreeShape,
-    drag_point: Option<PointId>,
-    hist: HashMap<(NodeId, NodeId), usize>,
+    drag_point: Option<PointI>,
+    hist: HashMap<(NodeI, NodeI), usize>,
 }
 impl App {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
@@ -202,7 +203,7 @@ impl eframe::App for App {
                         let tree: QuadTree =
                             FilledTree::from_tree_shape_random_filled(&self.tree_shape, &mut rng)
                                 .into();
-                        let node_of_point: HashMap<PointId, NodeId> = tree
+                        let node_of_point: HashMap<PointI, NodeI> = tree
                             .points()
                             .iter()
                             .enumerate()
@@ -393,6 +394,7 @@ impl eframe::App for App {
                     let painter = ui.painter_at(ui.max_rect());
 
                     // histogram
+                    #[cfg(false)]
                     'histogram: {
                         if highlighted_point.is_none()
                             && let Some(mouse_pos) = ctx.input(|i| i.pointer.latest_pos())
@@ -404,7 +406,7 @@ impl eframe::App for App {
                             else {
                                 break 'histogram;
                             };
-                            let mut counter: HashMap<NodeId, usize> = HashMap::new();
+                            let mut counter: HashMap<NodeI, usize> = HashMap::new();
 
                             for (&(a_i, b_i), &count) in &self.hist {
                                 let other_i = match () {
@@ -419,7 +421,7 @@ impl eframe::App for App {
                             if max_counter == 0 {
                                 break 'histogram;
                             }
-                            let domain_of_node: HashMap<NodeId, Square> = {
+                            let domain_of_node: HashMap<NodeI, Square> = {
                                 let mut ret = HashMap::new();
                                 let mut frontier = vec![(0, Square::UNIT)];
                                 while let Some((node_i, square)) = frontier.pop() {
@@ -448,6 +450,118 @@ impl eframe::App for App {
                                         200 - (150.0 * (count as f32 / max_counter as f32)) as u8,
                                     ),
                                 );
+                            }
+                        }
+                    }
+
+                    // neighbors
+                    #[cfg(true)]
+                    {
+                        'neighbors: {
+                            if highlighted_point.is_none()
+                                && let Some(mouse_pos) = ctx.input(|i| i.pointer.latest_pos())
+                            {
+                                // TODO: this is kinda evil
+                                let tree = QuadTree::from(&self.tree_shape);
+                                let Some(node_i) =
+                                    tree.node_of_point(camera_map.egui_to_cam(mouse_pos))
+                                else {
+                                    break 'neighbors;
+                                };
+                                let alg_tree =
+                                    AlgTree::from(FilledTree::from_tree_shape_random_filled(
+                                        &self.tree_shape,
+                                        &mut rand::rng(),
+                                    ));
+
+                                // TODO: this is duplicated
+                                let domain_of_node: HashMap<NodeI, Square> = {
+                                    let mut ret = HashMap::new();
+                                    let mut frontier = vec![(0, Square::UNIT)];
+                                    while let Some((node_i, square)) = frontier.pop() {
+                                        match &tree.nodes()[node_i] {
+                                            QuadNode::Leaf(_) => {
+                                                ret.insert(node_i, square);
+                                            }
+                                            QuadNode::Internal(children) => {
+                                                for (child_i, child_square) in children
+                                                    .clone()
+                                                    .into_iter()
+                                                    .zip(square.children())
+                                                {
+                                                    frontier.push((child_i, child_square));
+                                                }
+                                            }
+                                        }
+                                    }
+                                    ret
+                                };
+
+                                // draw neighbors
+                                // {
+                                //     let AlgNode::Leaf { neighbors, .. } =
+                                //         alg_tree.nodes[node_i].clone()
+                                //     else {
+                                //         panic!("not a leaf node");
+                                //     };
+                                //     for neighbor_i in neighbors.into_iter() {
+                                //         painter.rect_filled(
+                                //             camera_map.square_to_rect(&domain_of_node[&neighbor_i]),
+                                //             0.0,
+                                //             Color32::from_rgb(50, 200, 50),
+                                //         );
+                                //     }
+                                //     break 'neighbors;
+                                // }
+
+                                // this is symmetric
+                                let mut oracle_neighbors2: HashSet<NodeI> = HashSet::new();
+
+                                for &(a_i, b_i) in self.hist.keys() {
+                                    oracle_neighbors2.insert(match () {
+                                        _ if a_i == node_i => b_i,
+                                        _ if b_i == node_i => a_i,
+                                        _ => continue,
+                                    });
+                                }
+
+                                // draw neighbors2
+                                {
+                                    let neighbors2 = alg_tree.neighbors2(node_i);
+                                    for other_i in 0..tree.nodes().len() {
+                                        if other_i == node_i {
+                                            continue;
+                                        }
+                                        if !matches!(&tree.nodes()[other_i], QuadNode::Leaf { .. })
+                                        {
+                                            continue;
+                                        }
+                                        if !(oracle_neighbors2.contains(&other_i)
+                                            || neighbors2.contains(&other_i))
+                                        {
+                                            continue;
+                                        }
+                                        painter.rect_filled(
+                                            camera_map.square_to_rect(&domain_of_node[&other_i]),
+                                            0.0,
+                                            match (
+                                                oracle_neighbors2.contains(&other_i),
+                                                // non-symmetric neighbors
+                                                // neighbors2.contains(&other_i),
+                                                // symmetric neighbors
+                                                neighbors2.contains(&other_i)
+                                                    || alg_tree
+                                                        .neighbors2(other_i)
+                                                        .contains(&node_i),
+                                            ) {
+                                                (true, true) => Color32::from_rgb(50, 255, 50),
+                                                (true, false) => Color32::from_rgb(255, 50, 50),
+                                                (false, true) => Color32::from_rgb(50, 50, 255),
+                                                (false, false) => unreachable!(),
+                                            },
+                                        );
+                                    }
+                                }
                             }
                         }
                     }

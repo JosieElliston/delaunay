@@ -4,10 +4,10 @@ use rand::prelude::*;
 
 use crate::point::{self, *};
 
-pub(crate) type NodeId = usize;
+pub(crate) type NodeI = usize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum ChildId {
+pub(crate) enum ChildI {
     DownLeft = 0,
     DownRight = 1,
     UpLeft = 2,
@@ -111,12 +111,12 @@ impl Square {
     /// y-up:
     /// 2 3
     /// 0 1
-    pub(crate) fn child_i_of_point(&self, point: Point) -> ChildId {
+    pub(crate) fn child_i_of_point(&self, point: Point) -> ChildI {
         match (point.x() < self.mid.x(), point.y() < self.mid.y()) {
-            (true, true) => ChildId::DownLeft,
-            (false, true) => ChildId::DownRight,
-            (true, false) => ChildId::UpLeft,
-            (false, false) => ChildId::UpRight,
+            (true, true) => ChildI::DownLeft,
+            (false, true) => ChildI::DownRight,
+            (true, false) => ChildI::UpLeft,
+            (false, false) => ChildI::UpRight,
         }
     }
 
@@ -171,15 +171,15 @@ pub(crate) struct Children<T> {
     pub(crate) up_left: T,
     pub(crate) up_right: T,
 }
-impl<T> std::ops::Index<ChildId> for Children<T> {
+impl<T> std::ops::Index<ChildI> for Children<T> {
     type Output = T;
 
-    fn index(&self, index: ChildId) -> &Self::Output {
+    fn index(&self, index: ChildI) -> &Self::Output {
         match index {
-            ChildId::DownLeft => &self.down_left,
-            ChildId::DownRight => &self.down_right,
-            ChildId::UpLeft => &self.up_left,
-            ChildId::UpRight => &self.up_right,
+            ChildI::DownLeft => &self.down_left,
+            ChildI::DownRight => &self.down_right,
+            ChildI::UpLeft => &self.up_left,
+            ChildI::UpRight => &self.up_right,
         }
     }
 }
@@ -204,11 +204,11 @@ impl<T> IntoIterator for Children<T> {
 
 #[derive(Debug, Clone)]
 pub(crate) enum QuadNode {
-    Leaf(Option<PointId>),
+    Leaf(Option<PointI>),
     /// y-up:
     /// 2 3
     /// 0 1
-    Internal(Children<NodeId>),
+    Internal(Children<NodeI>),
 }
 #[derive(Debug, Clone)]
 pub(crate) struct QuadTree {
@@ -254,7 +254,7 @@ impl QuadTree {
 
     /// already have p_i in points
     /// but this will increase the len of nodes
-    fn insert_into_node(&mut self, p_i: PointId, node_i: NodeId, domain: &Square) {
+    fn insert_into_node(&mut self, p_i: PointI, node_i: NodeI, domain: &Square) {
         assert!(domain.contains(self.points[p_i]));
         match self.nodes[node_i].clone() {
             QuadNode::Leaf(None) => {
@@ -325,7 +325,7 @@ impl QuadTree {
     //     }
     // }
 
-    pub(crate) fn node_of_point(&self, point: Point) -> Option<NodeId> {
+    pub(crate) fn node_of_point(&self, point: Point) -> Option<NodeI> {
         let mut node_i = 0;
         let mut domain = self.domain.clone();
         if !domain.contains(point) {
@@ -481,8 +481,8 @@ impl From<FilledTree> for QuadTree {
 /// ie every leaf is filled
 #[derive(Debug, Clone)]
 pub(crate) enum FilledNode {
-    Leaf(PointId),
-    Internal(Children<NodeId>),
+    Leaf(PointI),
+    Internal(Children<NodeI>),
 }
 #[derive(Debug, Default, Clone)]
 pub(crate) struct FilledTree {

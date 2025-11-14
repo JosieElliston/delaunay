@@ -1,7 +1,7 @@
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 pub(crate) type Coord = f64;
-pub(crate) type PointId = usize;
+pub(crate) type PointI = usize;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Point {
