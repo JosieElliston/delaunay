@@ -1,14 +1,20 @@
 mod point;
 mod quartic;
-mod utils;
 mod tree;
+mod utils;
+mod v1;
 
+use std::collections::VecDeque;
+use std::hash::Hash;
 use std::iter::once;
+use std::time::Instant;
 
 use eframe::egui::ahash::{HashMap, HashMapExt, HashSet};
 use eframe::egui::{self, Color32, Key, Pos2, Rect, RichText, Vec2};
+use rand::SeedableRng;
 
 use crate::point::*;
+use crate::tree::*;
 use crate::utils::*;
 
 fn main() {
@@ -127,6 +133,19 @@ impl CameraMap {
     fn cam_to_egui(&self, point: Point) -> Pos2 {
         Pos2::new(self.cam_to_egui_x(point.x()), self.cam_to_egui_y(point.y()))
     }
+
+    fn square_to_rect(&self, square: &Square) -> Rect {
+        Rect::from_min_max(
+            Pos2::new(
+                self.cam_to_egui_x(square.x_lo()),
+                self.cam_to_egui_y(square.y_hi()),
+            ),
+            Pos2::new(
+                self.cam_to_egui_x(square.x_hi()),
+                self.cam_to_egui_y(square.y_lo()),
+            ),
+        )
+    }
 }
 
 struct App {
@@ -134,25 +153,33 @@ struct App {
     velocity: Vec2,
     dts: egui::util::History<f32>,
     points: Vec<Point>,
-    drag_point: Option<usize>,
-    hist: HashMap<(usize, usize), usize>,
+    // tree: FilledTree,
+    tree_shape: TreeShape,
+    drag_point: Option<PointId>,
+    hist: HashMap<(NodeId, NodeId), usize>,
 }
 impl App {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(4);
+        let tree_shape = TreeShape::from_random(0.5, 5, &mut rng);
         Self {
             camera: Camera::new(0.5, 0.5, 0.7),
             velocity: Vec2::ZERO,
             dts: egui::util::History::new(1..256, 1.0),
-            points: std::fs::read_to_string("points.csv")
-                .unwrap()
-                .lines()
-                .filter_map(|line| {
-                    let mut split = line.split(',');
-                    let x: f32 = split.next()?.trim().parse().ok()?;
-                    let y: f32 = split.next()?.trim().parse().ok()?;
-                    Some(Point::new(x as Coord, y as Coord))
-                })
-                .collect(),
+            // points: std::fs::read_to_string("points.csv")
+            //     .unwrap()
+            //     .lines()
+            //     .filter_map(|line| {
+            //         let mut split = line.split(',');
+            //         let x: f32 = split.next()?.trim().parse().ok()?;
+            //         let y: f32 = split.next()?.trim().parse().ok()?;
+            //         Some(Point::new(x as Coord, y as Coord))
+            //     })
+            //     .collect(),
+            points: FilledTree::from_tree_shape_random_filled(&tree_shape, &mut rng)
+                .points()
+                .into(),
+            tree_shape,
             drag_point: None,
             hist: HashMap::new(),
         }
@@ -168,6 +195,47 @@ impl eframe::App for App {
                     ctx.input(|input_state| input_state.time),
                     ctx.input(|input_state| input_state.stable_dt),
                 );
+
+                // histogram over edges in triangulation
+                if ctx.input(|i| i.key_down(Key::Space)) {
+                    let mut rng = rand::rng();
+                    let start = Instant::now();
+                    while start.elapsed() < std::time::Duration::from_secs_f32(1.0 / 10.0) {
+                        let tree: Tree =
+                            FilledTree::from_tree_shape_random_filled(&self.tree_shape, &mut rng)
+                                .into();
+                        let node_of_point: HashMap<PointId, NodeId> = tree
+                            .points()
+                            .iter()
+                            .enumerate()
+                            .map(|(p_i, &p)| (p_i, tree.node_of_point(p).unwrap()))
+                            .collect();
+                        for (a_i, b_i, c_i) in quartic::triangulate(tree.points()) {
+                            // they aren't edges but canonicalize_edge still works
+                            *self
+                                .hist
+                                .entry(utils::canonicalize_edge(
+                                    node_of_point[&a_i],
+                                    node_of_point[&b_i],
+                                ))
+                                .or_default() += 1;
+                            *self
+                                .hist
+                                .entry(utils::canonicalize_edge(
+                                    node_of_point[&b_i],
+                                    node_of_point[&c_i],
+                                ))
+                                .or_default() += 1;
+                            *self
+                                .hist
+                                .entry(utils::canonicalize_edge(
+                                    node_of_point[&c_i],
+                                    node_of_point[&a_i],
+                                ))
+                                .or_default() += 1;
+                        }
+                    }
+                }
 
                 let camera_map = CameraMap::new(ui.max_rect(), self.camera);
 
@@ -325,6 +393,66 @@ impl eframe::App for App {
                 // drawing
                 {
                     let painter = ui.painter_at(ui.max_rect());
+
+                    // histogram
+                    'histogram: {
+                        if highlighted_point.is_none()
+                            && let Some(mouse_pos) = ctx.input(|i| i.pointer.latest_pos())
+                        {
+                            // TODO: this is kinda evil
+                            let tree = Tree::from(&self.tree_shape);
+                            let Some(node_i) =
+                                tree.node_of_point(camera_map.egui_to_cam(mouse_pos))
+                            else {
+                                break 'histogram;
+                            };
+                            let mut counter: HashMap<NodeId, usize> = HashMap::new();
+
+                            for (&(a_i, b_i), &count) in &self.hist {
+                                let other_i = match () {
+                                    _ if a_i == node_i => b_i,
+                                    _ if b_i == node_i => a_i,
+                                    _ => continue,
+                                };
+                                *counter.entry(other_i).or_default() += count;
+                            }
+
+                            let max_counter = counter.values().max().cloned().unwrap_or(0);
+                            if max_counter == 0 {
+                                break 'histogram;
+                            }
+                            let domain_of_node: HashMap<NodeId, Square> = {
+                                let mut ret = HashMap::new();
+                                let mut frontier = vec![(0, Square::UNIT)];
+                                while let Some((node_i, square)) = frontier.pop() {
+                                    match tree.nodes()[node_i] {
+                                        Node::Leaf(_) => {
+                                            ret.insert(node_i, square);
+                                        }
+                                        Node::Internal(children) => {
+                                            for (&child_i, child_square) in
+                                                children.iter().zip(square.children())
+                                            {
+                                                frontier.push((child_i, child_square));
+                                            }
+                                        }
+                                    }
+                                }
+                                ret
+                            };
+                            for (&other_i, &count) in &counter {
+                                painter.rect_filled(
+                                    camera_map.square_to_rect(&domain_of_node[&other_i]),
+                                    0.0,
+                                    Color32::from_rgb(
+                                        200,
+                                        200 - (150.0 * (count as f32 / max_counter as f32)) as u8,
+                                        200 - (150.0 * (count as f32 / max_counter as f32)) as u8,
+                                    ),
+                                );
+                            }
+                        }
+                    }
 
                     // invariant region
                     if let Some(highlighted_point) = highlighted_point {
@@ -500,44 +628,65 @@ impl eframe::App for App {
                         }
                     }
 
-                    // draw debug ~quadtree lines
+                    // // draw debug ~quadtree lines
+                    // {
+                    //     let draw_square = |mid: Point, rad: Coord| {
+                    //         const PRIMARY_COLOR: Color32 = Color32::from_rgb(10, 10, 255);
+                    //         const SECONDARY_COLOR: Color32 = Color32::from_rgb(100, 100, 200);
+
+                    //         let ul =
+                    //             camera_map.cam_to_egui(Point::new(mid.x() - rad, mid.y() + rad));
+                    //         let ur =
+                    //             camera_map.cam_to_egui(Point::new(mid.x() + rad, mid.y() + rad));
+                    //         let dl =
+                    //             camera_map.cam_to_egui(Point::new(mid.x() - rad, mid.y() - rad));
+                    //         let dr =
+                    //             camera_map.cam_to_egui(Point::new(mid.x() + rad, mid.y() - rad));
+
+                    //         painter.line_segment([ul, ur], (1.0, PRIMARY_COLOR));
+                    //         painter.line_segment([ur, dr], (1.0, PRIMARY_COLOR));
+                    //         painter.line_segment([dr, dl], (1.0, PRIMARY_COLOR));
+                    //         painter.line_segment([dl, ul], (1.0, PRIMARY_COLOR));
+
+                    //         let um = camera_map.cam_to_egui(Point::new(mid.x(), mid.y() + rad));
+                    //         let dm = camera_map.cam_to_egui(Point::new(mid.x(), mid.y() - rad));
+                    //         let lm = camera_map.cam_to_egui(Point::new(mid.x() - rad, mid.y()));
+                    //         let rm = camera_map.cam_to_egui(Point::new(mid.x() + rad, mid.y()));
+
+                    //         painter.line_segment([um, dm], (1.0, SECONDARY_COLOR));
+                    //         painter.line_segment([lm, rm], (1.0, SECONDARY_COLOR));
+                    //     };
+
+                    //     draw_square(Point::new(1.0, 1.0), 1.0);
+
+                    //     draw_square(Point::new(1.0 / 2.0, 1.0 / 2.0), 1.0 / 2.0);
+                    //     draw_square(Point::new(3.0 / 4.0, 3.0 / 4.0), 1.0 / 4.0);
+                    //     draw_square(Point::new(5.0 / 8.0, 5.0 / 8.0), 1.0 / 8.0);
+
+                    //     draw_square(Point::new(3.0 / 2.0, 1.0 / 2.0), 1.0 / 2.0);
+                    //     draw_square(Point::new(5.0 / 4.0, 1.0 / 4.0), 1.0 / 4.0);
+                    //     draw_square(Point::new(5.0 / 4.0, 3.0 / 4.0), 1.0 / 4.0);
+                    // }
+
+                    // draw tree shape
                     {
-                        let draw_square = |mid: Point, rad: Coord| {
-                            const PRIMARY_COLOR: Color32 = Color32::from_rgb(10, 10, 255);
-                            const SECONDARY_COLOR: Color32 = Color32::from_rgb(100, 100, 200);
+                        // let mut frontier = VecDeque::from([(&self.tree_shape, Square::UNIT)]);
+                        let mut frontier = vec![(&self.tree_shape, Square::UNIT)];
 
-                            let ul =
-                                camera_map.cam_to_egui(Point::new(mid.x() - rad, mid.y() + rad));
-                            let ur =
-                                camera_map.cam_to_egui(Point::new(mid.x() + rad, mid.y() + rad));
-                            let dl =
-                                camera_map.cam_to_egui(Point::new(mid.x() - rad, mid.y() - rad));
-                            let dr =
-                                camera_map.cam_to_egui(Point::new(mid.x() + rad, mid.y() - rad));
-
-                            painter.line_segment([ul, ur], (1.0, PRIMARY_COLOR));
-                            painter.line_segment([ur, dr], (1.0, PRIMARY_COLOR));
-                            painter.line_segment([dr, dl], (1.0, PRIMARY_COLOR));
-                            painter.line_segment([dl, ul], (1.0, PRIMARY_COLOR));
-
-                            let um = camera_map.cam_to_egui(Point::new(mid.x(), mid.y() + rad));
-                            let dm = camera_map.cam_to_egui(Point::new(mid.x(), mid.y() - rad));
-                            let lm = camera_map.cam_to_egui(Point::new(mid.x() - rad, mid.y()));
-                            let rm = camera_map.cam_to_egui(Point::new(mid.x() + rad, mid.y()));
-
-                            painter.line_segment([um, dm], (1.0, SECONDARY_COLOR));
-                            painter.line_segment([lm, rm], (1.0, SECONDARY_COLOR));
-                        };
-
-                        draw_square(Point::new(1.0, 1.0), 1.0);
-
-                        draw_square(Point::new(1.0 / 2.0, 1.0 / 2.0), 1.0 / 2.0);
-                        draw_square(Point::new(3.0 / 4.0, 3.0 / 4.0), 1.0 / 4.0);
-                        draw_square(Point::new(5.0 / 8.0, 5.0 / 8.0), 1.0 / 8.0);
-
-                        draw_square(Point::new(3.0 / 2.0, 1.0 / 2.0), 1.0 / 2.0);
-                        draw_square(Point::new(5.0 / 4.0, 1.0 / 4.0), 1.0 / 4.0);
-                        draw_square(Point::new(5.0 / 4.0, 3.0 / 4.0), 1.0 / 4.0);
+                        while let Some((shape, square)) = frontier.pop() {
+                            painter.rect_stroke(
+                                camera_map.square_to_rect(&square),
+                                0.0,
+                                egui::Stroke::new(1.0, Color32::from_rgb(50, 50, 200)),
+                                egui::StrokeKind::Inside,
+                            );
+                            if let TreeShape::Internal(children) = shape {
+                                for (child, child_square) in children.iter().zip(square.children())
+                                {
+                                    frontier.push((child, child_square));
+                                }
+                            }
+                        }
                     }
 
                     // draw triangulation
@@ -564,7 +713,9 @@ impl eframe::App for App {
                         } else {
                             painter.circle_filled(
                                 camera_map.cam_to_egui(point),
-                                5.0,
+                                // so if you're zoomed out, points don't cover everything
+                                (camera_map.cam_to_egui_x(0.01) - camera_map.cam_to_egui_x(0.0))
+                                    .min(5.0),
                                 Color32::from_rgb(200, 200, 200),
                             );
                         }
@@ -573,20 +724,17 @@ impl eframe::App for App {
 
                 // area is to allow the frame to be drawn on top
                 egui::Area::new(egui::Id::new("area"))
-                    .constrain_to(ctx.screen_rect())
+                    .constrain_to(ctx.content_rect())
                     .anchor(egui::Align2::LEFT_TOP, egui::Vec2::ZERO)
                     .show(ui.ctx(), |ui| {
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+
                         // frame rate
                         {
                             let average_dt = self
                                 .dts
                                 .average()
                                 .expect("we added one this frame so dts must be non-empty");
-                            // ui.label(format!(
-                            //     "    dt: {:08.04}\n1/dt: {:08.04}",
-                            //     average_dt,
-                            //     1.0 / average_dt,
-                            // ));
                             ui.label(
                                 RichText::new(format!(
                                     "    dt: {:08.04}\n1/dt: {:08.04}",
@@ -596,6 +744,17 @@ impl eframe::App for App {
                                 .background_color(Color32::BLACK),
                             );
                         }
+
+                        // histogram stats
+                        ui.label(
+                            RichText::new(format!(
+                                "hist len: {}\nhist sum: {}",
+                                self.hist.len(),
+                                self.hist.values().cloned().sum::<usize>()
+                            ))
+                            .monospace()
+                            .background_color(Color32::BLACK),
+                        );
                     });
             });
     }

@@ -4,38 +4,71 @@ use rand::prelude::*;
 
 use crate::point::{self, *};
 
-type NodeId = usize;
+pub(crate) type NodeId = usize;
 
 #[derive(Debug, Clone)]
-struct Square {
+pub(crate) struct Square {
     mid: Point,
     rad: Coord,
 }
 impl Square {
-    const UNIT: Self = Self {
+    pub(crate) const UNIT: Self = Self {
         mid: Point::new(0.5, 0.5),
         rad: 0.5,
     };
 
-    fn new(mid: Point, rad: Coord) -> Self {
+    pub(crate) fn new(mid: Point, rad: Coord) -> Self {
         assert!(rad > 0.0);
         Self { mid, rad }
     }
 
-    fn x_lo(&self) -> Coord {
+    pub(crate) fn mid(&self) -> Point {
+        self.mid
+    }
+    pub(crate) fn rad(&self) -> Coord {
+        self.rad
+    }
+
+    pub(crate) fn x_lo(&self) -> Coord {
         self.mid.x() - self.rad
     }
-    fn x_hi(&self) -> Coord {
+    pub(crate) fn x_hi(&self) -> Coord {
         self.mid.x() + self.rad
     }
-    fn y_lo(&self) -> Coord {
+    pub(crate) fn y_lo(&self) -> Coord {
         self.mid.y() - self.rad
     }
-    fn y_hi(&self) -> Coord {
+    pub(crate) fn y_hi(&self) -> Coord {
         self.mid.y() + self.rad
     }
 
-    fn sample(&self, rng: &mut impl rand::Rng) -> Point {
+    pub(crate) fn down_left(&self) -> Point {
+        Point::new(self.x_lo(), self.y_lo())
+    }
+    pub(crate) fn down_right(&self) -> Point {
+        Point::new(self.x_hi(), self.y_lo())
+    }
+    pub(crate) fn up_left(&self) -> Point {
+        Point::new(self.x_lo(), self.y_hi())
+    }
+    pub(crate) fn up_right(&self) -> Point {
+        Point::new(self.x_hi(), self.y_hi())
+    }
+
+    pub(crate) fn up_mid(&self) -> Point {
+        Point::new(self.mid.x(), self.y_hi())
+    }
+    pub(crate) fn down_mid(&self) -> Point {
+        Point::new(self.mid.x(), self.y_lo())
+    }
+    pub(crate) fn left_mid(&self) -> Point {
+        Point::new(self.x_lo(), self.mid.y())
+    }
+    pub(crate) fn right_mid(&self) -> Point {
+        Point::new(self.x_hi(), self.mid.y())
+    }
+
+    pub(crate) fn sample(&self, rng: &mut impl rand::Rng) -> Point {
         Point::new(
             rng.random_range(self.x_lo()..self.x_hi()),
             rng.random_range(self.y_lo()..self.y_hi()),
@@ -45,7 +78,7 @@ impl Square {
     /// y-up:
     /// 2 3
     /// 0 1
-    fn children(&self) -> [Self; 4] {
+    pub(crate) fn children(&self) -> [Self; 4] {
         let half_rad = self.rad / 2.0;
         [
             Square::new(
@@ -70,7 +103,7 @@ impl Square {
     /// y-up:
     /// 2 3
     /// 0 1
-    fn child_i_of_point(&self, point: Point) -> usize {
+    pub(crate) fn child_i_of_point(&self, point: Point) -> usize {
         match (point.x() < self.mid.x(), point.y() < self.mid.y()) {
             (true, true) => 0,
             (false, true) => 1,
@@ -79,7 +112,7 @@ impl Square {
         }
     }
 
-    fn contains(&self, point: Point) -> bool {
+    pub(crate) fn contains(&self, point: Point) -> bool {
         point.x() >= self.x_lo()
             && point.x() <= self.x_hi()
             && point.y() >= self.y_lo()
@@ -94,9 +127,24 @@ impl Default for Square {
 
 /// basically a quadtree where every leaf is empty
 #[derive(Debug, Clone)]
-enum TreeShape {
+pub(crate) enum TreeShape {
     Leaf,
     Internal(Box<[TreeShape; 4]>),
+}
+impl TreeShape {
+    pub(crate) fn from_random(leaf_prob: f64, max_depth: usize, rng: &mut impl Rng) -> Self {
+        assert!((0.0..=1.0).contains(&leaf_prob));
+        if max_depth == 0 || rng.random_bool(leaf_prob) {
+            TreeShape::Leaf
+        } else {
+            TreeShape::Internal(Box::new([
+                TreeShape::from_random(leaf_prob, max_depth - 1, rng),
+                TreeShape::from_random(leaf_prob, max_depth - 1, rng),
+                TreeShape::from_random(leaf_prob, max_depth - 1, rng),
+                TreeShape::from_random(leaf_prob, max_depth - 1, rng),
+            ]))
+        }
+    }
 }
 
 // #[derive(Debug, Clone)]
@@ -109,7 +157,7 @@ enum TreeShape {
 // }
 
 #[derive(Debug, Clone)]
-enum Node {
+pub(crate) enum Node {
     Leaf(Option<PointId>),
     /// y-up:
     /// 2 3
@@ -142,6 +190,13 @@ impl Tree {
     //         nodes: Vec::new(),
     //     }
     // }
+
+    pub(crate) fn points(&self) -> &[Point] {
+        &self.points
+    }
+    pub(crate) fn nodes(&self) -> &[Node] {
+        &self.nodes
+    }
 
     pub(crate) fn from_points(points: Vec<Point>) -> Self {
         let mut ret = Self::default();
@@ -217,6 +272,60 @@ impl Tree {
     //             (false, true) => children[1],
     //             (false, false) => children[3],
     //         },
+    //     }
+    // }
+
+    pub(crate) fn node_of_point(&self, point: Point) -> Option<NodeId> {
+        let mut node_i = 0;
+        let mut domain = self.domain.clone();
+        if !domain.contains(point) {
+            return None;
+        }
+        loop {
+            match &self.nodes[node_i] {
+                Node::Leaf(_) => {
+                    return Some(node_i);
+                }
+                Node::Internal(children) => {
+                    let child_i = domain.child_i_of_point(point);
+                    node_i = children[child_i];
+                    domain = domain.children()[child_i].clone();
+                }
+            }
+        }
+    }
+
+    // pub(crate) fn domain_of_node(&self, node_i: NodeId) -> Square {
+    //     assert!(node_i < self.nodes.len());
+    //     let mut domain = self.domain.clone();
+    //     let mut current_i = 0;
+    //     if node_i == 0 {
+    //         return domain;
+    //     }
+    //     loop {
+    //         match &self.nodes[current_i] {
+    //             Node::Leaf(_) => {
+    //                 return None;
+    //             }
+    //             Node::Internal(children) => {
+    //                 let mut found = false;
+    //                 for (child_i, &child_node_i) in children.iter().enumerate() {
+    //                     if child_node_i == node_i {
+    //                         domain = domain.children()[child_i].clone();
+    //                         return Some(domain);
+    //                     }
+    //                     if child_node_i > node_i {
+    //                         current_i = child_node_i;
+    //                         domain = domain.children()[child_i].clone();
+    //                         found = true;
+    //                         break;
+    //                     }
+    //                 }
+    //                 if !found {
+    //                     return None;
+    //                 }
+    //             }
+    //         }
     //     }
     // }
 
@@ -296,6 +405,23 @@ impl From<&TreeShape> for Tree {
         }
     }
 }
+impl From<FilledNode> for Node {
+    fn from(filled_node: FilledNode) -> Self {
+        match filled_node {
+            FilledNode::Leaf(p_i) => Node::Leaf(Some(p_i)),
+            FilledNode::Internal(children) => Node::Internal(children),
+        }
+    }
+}
+impl From<FilledTree> for Tree {
+    fn from(filled_tree: FilledTree) -> Self {
+        Self {
+            domain: filled_tree.domain,
+            points: filled_tree.points,
+            nodes: filled_tree.nodes.into_iter().map(Node::from).collect(),
+        }
+    }
+}
 
 /// every internal node has four children
 /// ie every leaf is filled
@@ -314,6 +440,10 @@ impl FilledTree {
     /// keep the same structure, but randomize where the points are in each leaf
     pub(crate) fn randomize(&mut self) {
         todo!()
+    }
+
+    pub(crate) fn points(&self) -> &[Point] {
+        &self.points
     }
 
     pub(crate) fn from_tree_shape_random_filled(shape: &TreeShape, rng: &mut impl Rng) -> Self {
