@@ -6,6 +6,14 @@ use crate::point::{self, *};
 
 pub(crate) type NodeId = usize;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum ChildId {
+    DownLeft = 0,
+    DownRight = 1,
+    UpLeft = 2,
+    UpRight = 3,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct Square {
     mid: Point,
@@ -78,37 +86,37 @@ impl Square {
     /// y-up:
     /// 2 3
     /// 0 1
-    pub(crate) fn children(&self) -> [Self; 4] {
+    pub(crate) fn children(&self) -> Children<Square> {
         let half_rad = self.rad / 2.0;
-        [
-            Square::new(
+        Children::<Square> {
+            down_left: Square::new(
                 Point::new(self.mid.x() - half_rad, self.mid.y() - half_rad),
                 half_rad,
             ),
-            Square::new(
+            down_right: Square::new(
                 Point::new(self.mid.x() + half_rad, self.mid.y() - half_rad),
                 half_rad,
             ),
-            Square::new(
+            up_left: Square::new(
                 Point::new(self.mid.x() - half_rad, self.mid.y() + half_rad),
                 half_rad,
             ),
-            Square::new(
+            up_right: Square::new(
                 Point::new(self.mid.x() + half_rad, self.mid.y() + half_rad),
                 half_rad,
             ),
-        ]
+        }
     }
 
     /// y-up:
     /// 2 3
     /// 0 1
-    pub(crate) fn child_i_of_point(&self, point: Point) -> usize {
+    pub(crate) fn child_i_of_point(&self, point: Point) -> ChildId {
         match (point.x() < self.mid.x(), point.y() < self.mid.y()) {
-            (true, true) => 0,
-            (false, true) => 1,
-            (true, false) => 2,
-            (false, false) => 3,
+            (true, true) => ChildId::DownLeft,
+            (false, true) => ChildId::DownRight,
+            (true, false) => ChildId::UpLeft,
+            (false, false) => ChildId::UpRight,
         }
     }
 
@@ -157,32 +165,70 @@ impl TreeShape {
 // }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Node {
+pub(crate) struct Children<T> {
+    pub(crate) down_left: T,
+    pub(crate) down_right: T,
+    pub(crate) up_left: T,
+    pub(crate) up_right: T,
+}
+impl<T> std::ops::Index<ChildId> for Children<T> {
+    type Output = T;
+
+    fn index(&self, index: ChildId) -> &Self::Output {
+        match index {
+            ChildId::DownLeft => &self.down_left,
+            ChildId::DownRight => &self.down_right,
+            ChildId::UpLeft => &self.up_left,
+            ChildId::UpRight => &self.up_right,
+        }
+    }
+}
+// impl<T> From<Children<T>> for [T; 4] {
+//     fn from(children: Children<T>) -> Self {
+//         [
+//             children.down_left,
+//             children.down_right,
+//             children.up_left,
+//             children.up_right,
+//         ]
+//     }
+// }
+impl<T> IntoIterator for Children<T> {
+    type Item = T;
+    type IntoIter = std::array::IntoIter<T, 4>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        IntoIterator::into_iter([self.down_left, self.down_right, self.up_left, self.up_right])
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum QuadNode {
     Leaf(Option<PointId>),
     /// y-up:
     /// 2 3
     /// 0 1
-    Internal([NodeId; 4]),
+    Internal(Children<NodeId>),
 }
 #[derive(Debug, Clone)]
-pub(crate) struct Tree {
+pub(crate) struct QuadTree {
     domain: Square,
     points: Vec<Point>,
     /// root is at index 0
     /// probably should have parents have lower index than their children
     /// probably should have children are contiguous
-    nodes: Vec<Node>,
+    nodes: Vec<QuadNode>,
 }
-impl Default for Tree {
+impl Default for QuadTree {
     fn default() -> Self {
         Self {
             domain: Square::default(),
             points: Vec::new(),
-            nodes: vec![Node::Leaf(None)],
+            nodes: vec![QuadNode::Leaf(None)],
         }
     }
 }
-impl Tree {
+impl QuadTree {
     // pub(crate) fn from_domain(domain: Square) -> Self {
     //     Self {
     //         domain,
@@ -194,13 +240,13 @@ impl Tree {
     pub(crate) fn points(&self) -> &[Point] {
         &self.points
     }
-    pub(crate) fn nodes(&self) -> &[Node] {
+    pub(crate) fn nodes(&self) -> &[QuadNode] {
         &self.nodes
     }
 
-    pub(crate) fn from_points(points: Vec<Point>) -> Self {
+    pub(crate) fn from_points(points: &[Point]) -> Self {
         let mut ret = Self::default();
-        for point in points {
+        for &point in points {
             ret.insert(point);
         }
         ret
@@ -210,22 +256,26 @@ impl Tree {
     /// but this will increase the len of nodes
     fn insert_into_node(&mut self, p_i: PointId, node_i: NodeId, domain: &Square) {
         assert!(domain.contains(self.points[p_i]));
-        match self.nodes[node_i] {
-            Node::Leaf(None) => {
+        match self.nodes[node_i].clone() {
+            QuadNode::Leaf(None) => {
                 // insert into the empty leaf
-                self.nodes[node_i] = Node::Leaf(Some(p_i));
+                self.nodes[node_i] = QuadNode::Leaf(Some(p_i));
             }
-            Node::Leaf(Some(leaf_point_i)) => {
+            QuadNode::Leaf(Some(leaf_point_i)) => {
                 // split the leaf, then insert both points
                 let node_len = self.nodes.len();
                 self.nodes
-                    .extend_from_slice(&[const { Node::Leaf(None) }; 4]);
-                self.nodes[node_i] =
-                    Node::Internal([node_len, node_len + 1, node_len + 2, node_len + 3]);
+                    .extend_from_slice(&[const { QuadNode::Leaf(None) }; 4]);
+                self.nodes[node_i] = QuadNode::Internal(Children {
+                    down_left: node_len,
+                    down_right: node_len + 1,
+                    up_left: node_len + 2,
+                    up_right: node_len + 3,
+                });
                 self.insert_into_node(leaf_point_i, node_i, domain);
                 self.insert_into_node(p_i, node_i, domain);
             }
-            Node::Internal(children) => {
+            QuadNode::Internal(children) => {
                 let child_i = domain.child_i_of_point(self.points[p_i]);
                 self.insert_into_node(p_i, children[child_i], &domain.children()[child_i]);
                 // match children[child_i] {
@@ -283,10 +333,10 @@ impl Tree {
         }
         loop {
             match &self.nodes[node_i] {
-                Node::Leaf(_) => {
+                QuadNode::Leaf(_) => {
                     return Some(node_i);
                 }
-                Node::Internal(children) => {
+                QuadNode::Internal(children) => {
                     let child_i = domain.child_i_of_point(point);
                     node_i = children[child_i];
                     domain = domain.children()[child_i].clone();
@@ -375,22 +425,26 @@ impl Tree {
     //     todo!()
     // }
 }
-impl From<&TreeShape> for Tree {
+impl From<&TreeShape> for QuadTree {
     fn from(shape: &TreeShape) -> Self {
-        let mut nodes = vec![Node::Leaf(None)];
+        let mut nodes = vec![QuadNode::Leaf(None)];
         let mut frontier = VecDeque::from([(0, shape)]);
 
         while let Some((node_i, shape)) = frontier.pop_front() {
             // make the node at node_i match shape
             assert!(node_i < nodes.len());
-            assert!(matches!(nodes[node_i], Node::Leaf(None)));
+            assert!(matches!(nodes[node_i], QuadNode::Leaf(None)));
             match shape {
                 TreeShape::Leaf => {}
                 TreeShape::Internal(children_shapes) => {
                     let node_len = nodes.len();
-                    nodes.extend_from_slice(&[const { Node::Leaf(None) }; 4]);
-                    nodes[node_i] =
-                        Node::Internal([node_len, node_len + 1, node_len + 2, node_len + 3]);
+                    nodes.extend_from_slice(&[const { QuadNode::Leaf(None) }; 4]);
+                    nodes[node_i] = QuadNode::Internal(Children {
+                        down_left: node_len,
+                        down_right: node_len + 1,
+                        up_left: node_len + 2,
+                        up_right: node_len + 3,
+                    });
                     for (i, child_shape) in children_shapes.iter().enumerate() {
                         frontier.push_back((node_len + i, child_shape));
                     }
@@ -405,20 +459,20 @@ impl From<&TreeShape> for Tree {
         }
     }
 }
-impl From<FilledNode> for Node {
+impl From<FilledNode> for QuadNode {
     fn from(filled_node: FilledNode) -> Self {
         match filled_node {
-            FilledNode::Leaf(p_i) => Node::Leaf(Some(p_i)),
-            FilledNode::Internal(children) => Node::Internal(children),
+            FilledNode::Leaf(p_i) => QuadNode::Leaf(Some(p_i)),
+            FilledNode::Internal(children) => QuadNode::Internal(children),
         }
     }
 }
-impl From<FilledTree> for Tree {
+impl From<FilledTree> for QuadTree {
     fn from(filled_tree: FilledTree) -> Self {
         Self {
             domain: filled_tree.domain,
             points: filled_tree.points,
-            nodes: filled_tree.nodes.into_iter().map(Node::from).collect(),
+            nodes: filled_tree.nodes.into_iter().map(QuadNode::from).collect(),
         }
     }
 }
@@ -426,15 +480,15 @@ impl From<FilledTree> for Tree {
 /// every internal node has four children
 /// ie every leaf is filled
 #[derive(Debug, Clone)]
-enum FilledNode {
+pub(crate) enum FilledNode {
     Leaf(PointId),
-    Internal([NodeId; 4]),
+    Internal(Children<NodeId>),
 }
 #[derive(Debug, Default, Clone)]
 pub(crate) struct FilledTree {
-    domain: Square,
-    points: Vec<Point>,
-    nodes: Vec<FilledNode>,
+    pub(crate) domain: Square,
+    pub(crate) points: Vec<Point>,
+    pub(crate) nodes: Vec<FilledNode>,
 }
 impl FilledTree {
     /// keep the same structure, but randomize where the points are in each leaf
@@ -442,26 +496,36 @@ impl FilledTree {
         todo!()
     }
 
-    pub(crate) fn points(&self) -> &[Point] {
-        &self.points
-    }
+    // pub(crate) fn domain(&self) -> &Square {
+    //     &self.domain
+    // }
+    // pub(crate) fn points(&self) -> &[Point] {
+    //     &self.points
+    // }
+    // pub(crate) fn nodes(&self) -> &[FilledNode] {
+    //     &self.nodes
+    // }
 
     pub(crate) fn from_tree_shape_random_filled(shape: &TreeShape, rng: &mut impl Rng) -> Self {
-        let mut ret: Tree = shape.into();
+        let mut ret: QuadTree = shape.into();
 
         let mut frontier = vec![(0, Square::UNIT)];
         while let Some((node_i, domain)) = frontier.pop() {
             match &ret.nodes[node_i] {
-                Node::Leaf(None) => {
+                QuadNode::Leaf(None) => {
                     let p_i = ret.points.len();
                     ret.points.push(domain.sample(rng));
-                    ret.nodes[node_i] = Node::Leaf(Some(p_i));
+                    ret.nodes[node_i] = QuadNode::Leaf(Some(p_i));
                 }
-                Node::Leaf(Some(_)) => {
+                QuadNode::Leaf(Some(_)) => {
                     unreachable!()
                 }
-                Node::Internal(children) => {
-                    for (&child_i, child_domain) in children.iter().zip(domain.children()) {
+                QuadNode::Internal(children) => {
+                    for (child_i, child_domain) in children
+                        .clone()
+                        .into_iter()
+                        .zip(domain.children().into_iter())
+                    {
                         frontier.push((child_i, child_domain));
                     }
                 }
@@ -471,21 +535,21 @@ impl FilledTree {
         ret.try_into().unwrap()
     }
 }
-impl TryFrom<Node> for FilledNode {
+impl TryFrom<QuadNode> for FilledNode {
     type Error = &'static str;
 
-    fn try_from(node: Node) -> Result<Self, Self::Error> {
+    fn try_from(node: QuadNode) -> Result<Self, Self::Error> {
         match node {
-            Node::Leaf(None) => Err("tree contains empty leaf"),
-            Node::Leaf(Some(p_i)) => Ok(FilledNode::Leaf(p_i)),
-            Node::Internal(children) => Ok(FilledNode::Internal(children)),
+            QuadNode::Leaf(None) => Err("tree contains empty leaf"),
+            QuadNode::Leaf(Some(p_i)) => Ok(FilledNode::Leaf(p_i)),
+            QuadNode::Internal(children) => Ok(FilledNode::Internal(children)),
         }
     }
 }
-impl TryFrom<Tree> for FilledTree {
+impl TryFrom<QuadTree> for FilledTree {
     type Error = &'static str;
 
-    fn try_from(tree: Tree) -> Result<Self, Self::Error> {
+    fn try_from(tree: QuadTree) -> Result<Self, Self::Error> {
         Ok(Self {
             domain: tree.domain,
             points: tree.points,

@@ -176,9 +176,7 @@ impl App {
             //         Some(Point::new(x as Coord, y as Coord))
             //     })
             //     .collect(),
-            points: FilledTree::from_tree_shape_random_filled(&tree_shape, &mut rng)
-                .points()
-                .into(),
+            points: FilledTree::from_tree_shape_random_filled(&tree_shape, &mut rng).points,
             tree_shape,
             drag_point: None,
             hist: HashMap::new(),
@@ -201,7 +199,7 @@ impl eframe::App for App {
                     let mut rng = rand::rng();
                     let start = Instant::now();
                     while start.elapsed() < std::time::Duration::from_secs_f32(1.0 / 10.0) {
-                        let tree: Tree =
+                        let tree: QuadTree =
                             FilledTree::from_tree_shape_random_filled(&self.tree_shape, &mut rng)
                                 .into();
                         let node_of_point: HashMap<PointId, NodeId> = tree
@@ -400,7 +398,7 @@ impl eframe::App for App {
                             && let Some(mouse_pos) = ctx.input(|i| i.pointer.latest_pos())
                         {
                             // TODO: this is kinda evil
-                            let tree = Tree::from(&self.tree_shape);
+                            let tree = QuadTree::from(&self.tree_shape);
                             let Some(node_i) =
                                 tree.node_of_point(camera_map.egui_to_cam(mouse_pos))
                             else {
@@ -425,13 +423,13 @@ impl eframe::App for App {
                                 let mut ret = HashMap::new();
                                 let mut frontier = vec![(0, Square::UNIT)];
                                 while let Some((node_i, square)) = frontier.pop() {
-                                    match tree.nodes()[node_i] {
-                                        Node::Leaf(_) => {
+                                    match &tree.nodes()[node_i] {
+                                        QuadNode::Leaf(_) => {
                                             ret.insert(node_i, square);
                                         }
-                                        Node::Internal(children) => {
-                                            for (&child_i, child_square) in
-                                                children.iter().zip(square.children())
+                                        QuadNode::Internal(children) => {
+                                            for (child_i, child_square) in
+                                                children.clone().into_iter().zip(square.children())
                                             {
                                                 frontier.push((child_i, child_square));
                                             }

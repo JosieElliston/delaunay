@@ -1,7 +1,8 @@
 # README
 
-- <https://www.desmos.com/calculator/mb0l9dzmws>
-- discrete and computational geometry Satyan Devadoss
+- draw invariant region for vertices (where the vertex can move without changing the triangulation)
+    - there are two kinds of flip that can occur
+    - the intersection of the regions of these two kinds of flip is the invariant for the vertex
 
 ## visualization ideas
 
@@ -29,3 +30,16 @@
 - look out 2*node_width
 - maybe: if a triangle is big enough, it must be acute
 - if a path from a cell to another cell crosses >= 3 quadtree lines in the same direction, they can't be an edge (i think this is correct)
+
+## other TODO
+
+- IndexMap<PointId, Point>
+- IndexMap<NodeId, Node>
+- IndexMap<ChildId, NodeId>
+- IndexMap<NeighborId, LeafNodeId>
+- or index_vec actually
+
+## references
+
+- <https://www.desmos.com/calculator/mb0l9dzmws>
+- discrete and computational geometry Satyan Devadoss
