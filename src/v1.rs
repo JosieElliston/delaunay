@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::ops::{Index, IndexMut};
 
 use eframe::egui::{
     accesskit::Node,
@@ -65,12 +65,38 @@ enum NeighborI {
     Down = 0b11,
 }
 impl NeighborI {
-    fn opposite(self) -> Self {
+    const ALL: [NeighborI; 4] = [
+        NeighborI::Left,
+        NeighborI::Up,
+        NeighborI::Right,
+        NeighborI::Down,
+    ];
+
+    const fn opposite(self) -> Self {
         match self {
             NeighborI::Left => NeighborI::Right,
             NeighborI::Up => NeighborI::Down,
             NeighborI::Right => NeighborI::Left,
             NeighborI::Down => NeighborI::Up,
+        }
+    }
+
+    const fn clockwise(self) -> Self {
+        match self {
+            NeighborI::Left => NeighborI::Up,
+            NeighborI::Up => NeighborI::Right,
+            NeighborI::Right => NeighborI::Down,
+            NeighborI::Down => NeighborI::Left,
+        }
+    }
+
+    const fn clockwise_n(self, n: usize) -> Self {
+        match n {
+            0 => self,
+            1 => self.clockwise(),
+            2 => self.clockwise().clockwise(),
+            3 => self.clockwise().clockwise().clockwise(),
+            _ => panic!("n must be 0..3"),
         }
     }
 }
@@ -80,16 +106,47 @@ impl NeighborI {
 /// and is still correct because the smaller leaves will see the bigger leaf,
 /// so it doesn't matter than the bigger leaf can't see them.
 // TODO: maybe if it's at a equal depth, it must also be right or down
+// #[derive(Debug, Default, Clone)]
+// pub(crate) struct Neighbors {
+//     left: Option<NodeI>,
+//     up: Option<NodeI>,
+//     down: Option<NodeI>,
+//     right: Option<NodeI>,
+// }
+// impl IntoIterator for Neighbors {
+//     type Item = NodeI;
+//     type IntoIter = std::iter::Flatten<std::array::IntoIter<Option<NodeI>, 4>>;
+
+//     fn into_iter(self) -> Self::IntoIter {
+//         IntoIterator::into_iter(
+//             [self.left, self.up, self.down, self.right]
+//                 .into_iter()
+//                 .flatten(),
+//         )
+//     }
+// }
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Neighbors {
-    left: Option<NodeI>,
-    up: Option<NodeI>,
-    down: Option<NodeI>,
-    right: Option<NodeI>,
+    left: Vec<NodeI>,
+    up: Vec<NodeI>,
+    down: Vec<NodeI>,
+    right: Vec<NodeI>,
 }
+// impl IntoIterator for Neighbors {
+//     type Item = NodeI;
+//     type IntoIter = std::iter::Flatten<std::array::IntoIter<Option<NodeI>, 4>>;
+
+//     fn into_iter(self) -> Self::IntoIter {
+//         IntoIterator::into_iter(
+//             [self.left, self.up, self.down, self.right]
+//                 .into_iter()
+//                 .flatten(),
+//         )
+//     }
+// }
 impl IntoIterator for Neighbors {
     type Item = NodeI;
-    type IntoIter = std::iter::Flatten<std::array::IntoIter<Option<NodeI>, 4>>;
+    type IntoIter = std::iter::Flatten<std::array::IntoIter<std::vec::Vec<usize>, 4>>;
 
     fn into_iter(self) -> Self::IntoIter {
         IntoIterator::into_iter(
@@ -97,6 +154,28 @@ impl IntoIterator for Neighbors {
                 .into_iter()
                 .flatten(),
         )
+    }
+}
+impl Index<NeighborI> for Neighbors {
+    type Output = Vec<NodeI>;
+
+    fn index(&self, index: NeighborI) -> &Self::Output {
+        match index {
+            NeighborI::Left => &self.left,
+            NeighborI::Up => &self.up,
+            NeighborI::Right => &self.right,
+            NeighborI::Down => &self.down,
+        }
+    }
+}
+impl IndexMut<NeighborI> for Neighbors {
+    fn index_mut(&mut self, index: NeighborI) -> &mut Self::Output {
+        match index {
+            NeighborI::Left => &mut self.left,
+            NeighborI::Up => &mut self.up,
+            NeighborI::Right => &mut self.right,
+            NeighborI::Down => &mut self.down,
+        }
     }
 }
 
@@ -176,9 +255,41 @@ impl From<FilledTree> for AlgTree {
             ret
         };
 
+        // fn children_along_edge(tree: &AlgTree, direction: NeighborI, node_i: NodeI) -> Vec<NodeI> {
+        //     match &tree.nodes[node_i] {
+        //         AlgNode::Leaf { .. } => vec![node_i],
+        //         AlgNode::Internal(children) => match direction {
+        //             NeighborI::Left => {
+        //                 let mut result = vec![];
+        //                 result.extend(children_along_edge(tree, direction, children.up_left));
+        //                 result.extend(children_along_edge(tree, direction, children.down_left));
+        //                 result
+        //             },
+        //             NeighborI::Up => {
+        //                 let mut result = vec![];
+        //                 result.extend(children_along_edge(tree, direction, children.up_left));
+        //                 result.extend(children_along_edge(tree, direction, children.up_right));
+        //                 result
+        //             },
+        //             NeighborI::Right => {
+        //                 let mut result = vec![];
+        //                 result.extend(children_along_edge(tree, direction, children.up_right));
+        //                 result.extend(children_along_edge(tree, direction, children.down_right));
+        //                 result
+        //             },
+        //             NeighborI::Down => {
+        //                 let mut result = vec![];
+        //                 result.extend(children_along_edge(tree, direction, children.down_left));
+        //                 result.extend(children_along_edge(tree, direction, children.down_right));
+        //                 result
+        //             },
+        //         },
+        //     }
+        // }
+
         // populate neighbors
-        // fn neighbor_of_node(tree: &AlgTree, direction: NeighborI, node_i: NodeI) -> Option<NodeI> {
         let neighbor_of_node = |direction: NeighborI, node_i: NodeI| -> Option<NodeI> {
+            // let neighbors_of_node = |direction: NeighborI, node_i: NodeI| -> Vec<NodeI> {
             assert!(matches!(tree.nodes[node_i], AlgNode::Leaf { .. }));
             // ur dl dr, dr ul
             // go up, storing the child_i taken
@@ -189,8 +300,8 @@ impl From<FilledTree> for AlgTree {
             let mut path_up: Vec<ChildI> = Vec::new();
             loop {
                 let Some((parent_i, child_i)) = parent_child[node_i] else {
-                    // TODO: is this correct?
                     return None;
+                    // return Vec::new();
                 };
 
                 match (direction, child_i) {
@@ -292,16 +403,62 @@ impl From<FilledTree> for AlgTree {
         };
 
         // TODO: bad
-        let mut new_nodes = tree.nodes.clone();
-        for (node_i, node) in new_nodes.iter_mut().enumerate() {
-            if let AlgNode::Leaf { neighbors, .. } = node {
-                neighbors.left = neighbor_of_node(NeighborI::Left, node_i as NodeI);
-                neighbors.up = neighbor_of_node(NeighborI::Up, node_i as NodeI);
-                neighbors.right = neighbor_of_node(NeighborI::Right, node_i as NodeI);
-                neighbors.down = neighbor_of_node(NeighborI::Down, node_i as NodeI);
+        // let mut new_nodes = tree.nodes.clone();
+        // for (node_i, node) in new_nodes.iter_mut().enumerate() {
+        //     if let AlgNode::Leaf { neighbors, .. } = node {
+        //         neighbors.left = neighbor_of_node(NeighborI::Left, node_i as NodeI);
+        //         neighbors.up = neighbor_of_node(NeighborI::Up, node_i as NodeI);
+        //         neighbors.right = neighbor_of_node(NeighborI::Right, node_i as NodeI);
+        //         neighbors.down = neighbor_of_node(NeighborI::Down, node_i as NodeI);
+        //     }
+        // }
+        // tree.nodes = new_nodes;
+        // tree
+
+        // TODO: this is very slow
+
+        // build neighbor map
+        let neighbor_map = {
+            let mut neighbor_map: Vec<Neighbors> = vec![Default::default(); tree.nodes.len()];
+            for node_i in 0..tree.nodes.len() {
+                let AlgNode::Leaf { .. } = &tree.nodes[node_i] else {
+                    continue;
+                };
+                for direction in NeighborI::ALL {
+                    let Some(neighbor_i) = neighbor_of_node(direction, node_i) else {
+                        continue;
+                    };
+                    neighbor_map[node_i][direction].push(neighbor_i);
+                    neighbor_map[neighbor_i][direction.opposite()].push(node_i);
+                }
             }
+            neighbor_map
+        };
+
+        // dedup
+        let neighbor_map: Vec<Neighbors> = {
+            neighbor_map
+                .into_iter()
+                .map(|neighbors| Neighbors {
+                    left: Vec::from_iter(HashSet::from_iter(neighbors.left)),
+                    up: Vec::from_iter(HashSet::from_iter(neighbors.up)),
+                    down: Vec::from_iter(HashSet::from_iter(neighbors.down)),
+                    right: Vec::from_iter(HashSet::from_iter(neighbors.right)),
+                })
+                .collect()
+        };
+
+        // assign
+        for (node_i, new_neighbors) in neighbor_map.iter().enumerate() {
+            let AlgNode::Leaf {
+                neighbors: ref mut old_neighbors,
+                ..
+            } = tree.nodes[node_i]
+            else {
+                continue;
+            };
+            *old_neighbors = new_neighbors.clone();
         }
-        tree.nodes = new_nodes;
         tree
     }
 }
@@ -322,16 +479,133 @@ impl AlgTree {
         // .flatten()
     }
 
-    pub(crate) fn neighbors2(&self, node_i: NodeI) -> HashSet<NodeI> {
-        let neighbors = match &self.nodes[node_i] {
-            AlgNode::Leaf { neighbors, .. } => neighbors.clone().into_iter().collect::<Vec<_>>(),
-            _ => panic!("not a leaf node"),
-        };
+    // pub(crate) fn neighbors2(&self, node_i: NodeI) -> HashSet<NodeI> {
+    //     let neighbors = match &self.nodes[node_i] {
+    //         AlgNode::Leaf { neighbors, .. } => neighbors.clone().into_iter().collect::<Vec<_>>(),
+    //         _ => panic!("not a leaf node"),
+    //     };
+    //     let mut ret = HashSet::new();
+    //     for neighbor_i in neighbors {
+    //         ret.insert(neighbor_i);
+    //         for neighbor2_i in self.neighbors(neighbor_i) {
+    //             ret.insert(neighbor2_i);
+    //         }
+    //     }
+    //     ret.remove(&node_i);
+    //     ret
+    // }
+
+    // pub(crate) fn neighbors2(&self, node_i: NodeI) -> HashSet<NodeI> {
+    //     let neighbors = match &self.nodes[node_i] {
+    //         AlgNode::Leaf { neighbors, .. } => neighbors.clone().into_iter().collect::<Vec<_>>(),
+    //         _ => panic!("not a leaf node"),
+    //     };
+
+    //     // TODO: this is very very slow
+    //     fn collect_nodes(tree: &AlgTree, path: &[NeighborI], node_i: NodeI) -> Vec<NodeI> {
+    //         if path.is_empty() {
+    //             return vec![node_i];
+    //         }
+    //         let AlgNode::Leaf { neighbors, .. } = &tree.nodes[node_i] else {
+    //             panic!("not a leaf node");
+    //         };
+    //         let mut ret = Vec::new();
+    //         for neighbor_i in &neighbors[path[0]] {
+    //             ret.extend(collect_nodes(tree, &path[1..], *neighbor_i));
+    //         }
+    //         ret
+    //     }
+    //     let mut ret = HashSet::new();
+    //     let paths: [&[NeighborI]; _] = {
+    //         use NeighborI as NbI;
+    //         [
+    //             &[NbI::Left],
+    //             &[NbI::Left, NbI::Left],
+    //             &[NbI::Left, NbI::Right],
+    //             &[NbI::Left, NbI::Up],
+    //             &[NbI::Left, NbI::Down],
+    //             &[NbI::Left, NbI::Left, NbI::Up],
+    //             &[NbI::Left, NbI::Left, NbI::Down],
+    //             &[NbI::Left, NbI::Up, NbI::Left],
+    //             &[NbI::Left, NbI::Down, NbI::Left],
+    //             &[NbI::Left, NbI::Up, NbI::Right],
+    //             &[NbI::Left, NbI::Down, NbI::Right],
+    //             &[NbI::Left, NbI::Left, NbI::Up, NbI::Up],
+    //             &[NbI::Left, NbI::Left, NbI::Down, NbI::Down],
+    //         ]
+    //     };
+    //     for cw in 0..4 {
+    //         for path in paths {
+    //             ret.extend(collect_nodes(
+    //                 self,
+    //                 &path
+    //                     .iter()
+    //                     .map(|direction| direction.clockwise_n(cw))
+    //                     .collect::<Vec<_>>(),
+    //                 node_i,
+    //             ));
+    //         }
+    //     }
+    //     ret
+    // }
+    pub(crate) fn neighbors_diag(&self, node_i: NodeI) -> HashSet<NodeI> {
+        assert!(matches!(self.nodes[node_i], AlgNode::Leaf { .. }));
+        fn collect_nodes(tree: &AlgTree, path: &[NeighborI], node_i: NodeI) -> Vec<NodeI> {
+            if path.is_empty() {
+                return vec![node_i];
+            }
+            let AlgNode::Leaf { neighbors, .. } = &tree.nodes[node_i] else {
+                panic!("not a leaf node");
+            };
+            let mut ret = Vec::new();
+            for neighbor_i in &neighbors[path[0]] {
+                ret.extend(collect_nodes(tree, &path[1..], *neighbor_i));
+            }
+            ret
+        }
         let mut ret = HashSet::new();
-        for neighbor_i in neighbors {
+        let paths: [&[NeighborI]; _] = {
+            use NeighborI as NbI;
+            [
+                &[NbI::Left],
+                // &[NbI::Left, NbI::Right],
+                &[NbI::Left, NbI::Up],
+                &[NbI::Left, NbI::Down],
+            ]
+        };
+        for cw in 0..4 {
+            for path in paths {
+                ret.extend(collect_nodes(
+                    self,
+                    &path
+                        .iter()
+                        .map(|direction| direction.clockwise_n(cw))
+                        .collect::<Vec<_>>(),
+                    node_i,
+                ));
+            }
+        }
+        ret
+    }
+
+    pub(crate) fn neighbors2(&self, node_i: NodeI) -> HashSet<NodeI> {
+        assert!(matches!(self.nodes[node_i], AlgNode::Leaf { .. }));
+        let mut ret = HashSet::new();
+        // for neighbor_i in self.neighbors_diag(node_i) {
+        // // for neighbor_i in self.neighbors(node_i) {
+        //     ret.insert(neighbor_i);
+        //     for neighbor2_i in self.neighbors_diag(neighbor_i) {
+        //         ret.insert(neighbor2_i);
+        //     }
+        // }
+        // for neighbor_i in self.neighbors_diag(node_i) {
+        for neighbor_i in self.neighbors(node_i) {
             ret.insert(neighbor_i);
             for neighbor2_i in self.neighbors(neighbor_i) {
                 ret.insert(neighbor2_i);
+                for neighbor3_i in self.neighbors(neighbor2_i) {
+                    ret.insert(neighbor3_i);
+                }
             }
         }
         ret.remove(&node_i);

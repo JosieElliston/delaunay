@@ -154,6 +154,7 @@ struct App {
     velocity: Vec2,
     dts: egui::util::History<f32>,
     points: Vec<Point>,
+    triangles: Vec<(usize, usize, usize)>,
     // tree: FilledTree,
     tree_shape: TreeShape,
     drag_point: Option<PointI>,
@@ -163,7 +164,10 @@ impl App {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let mut rng = rand::rngs::SmallRng::seed_from_u64(4);
         let tree_shape = TreeShape::from_random(0.5, 5, &mut rng);
-        Self {
+
+        // let mut rng = rand::rngs::SmallRng::seed_from_u64(8);
+        // let tree_shape = TreeShape::from_random(0.3, 6, &mut rng);
+        let mut ret = Self {
             camera: Camera::new(0.5, 0.5, 0.7),
             velocity: Vec2::ZERO,
             dts: egui::util::History::new(1..256, 1.0),
@@ -178,10 +182,17 @@ impl App {
             //     })
             //     .collect(),
             points: FilledTree::from_tree_shape_random_filled(&tree_shape, &mut rng).points,
+            triangles: Vec::new(),
             tree_shape,
             drag_point: None,
             hist: HashMap::new(),
-        }
+        };
+        ret.update_triangulation();
+        ret
+    }
+
+    fn update_triangulation(&mut self) {
+        self.triangles = quartic::triangulate(&self.points);
     }
 }
 impl eframe::App for App {
@@ -195,7 +206,7 @@ impl eframe::App for App {
                     ctx.input(|input_state| input_state.stable_dt),
                 );
 
-                // histogram over edges in triangulation
+                // histogram over edges in a random triangulation
                 if ctx.input(|i| i.key_down(Key::Space)) {
                     let mut rng = rand::rng();
                     let start = Instant::now();
@@ -245,6 +256,7 @@ impl eframe::App for App {
                         self.points.push(
                             camera_map.egui_to_cam(ctx.input(|i| i.pointer.latest_pos().unwrap())),
                         );
+                        self.update_triangulation();
                     }
                 }
 
@@ -261,7 +273,7 @@ impl eframe::App for App {
                 }
 
                 // this is in egui coords
-                const HIGHLIGHT_DIST: f32 = 10.0;
+                const HIGHLIGHT_DIST: f32 = 5.0;
                 // the point the mouse is closest to and within threshold distance
                 let highlighted_point = {
                     if let Some(drag_point) = self.drag_point {
@@ -293,6 +305,7 @@ impl eframe::App for App {
                             || ctx.input(|i| i.key_pressed(Key::Backspace)))
                     {
                         self.points.remove(highlighted_point);
+                        self.update_triangulation();
                         // TODO: this is evil
                         if let Some(drag_point) = self.drag_point {
                             if drag_point == highlighted_point {
@@ -340,6 +353,7 @@ impl eframe::App for App {
                             if let Some(mouse_pos) = ctx.input(|i| i.pointer.latest_pos()) {
                                 let cam_pos = camera_map.egui_to_cam(mouse_pos);
                                 self.points[drag_point] = cam_pos;
+                                self.update_triangulation();
                             }
                         } else if r.drag_delta() != Vec2::ZERO {
                             self.camera -= pan_offset(r.drag_delta(), self.camera.x_rad as _);
@@ -372,10 +386,11 @@ impl eframe::App for App {
                     }
                 }
                 let camera_map = CameraMap::new(ui.max_rect(), self.camera);
-                let triangles = quartic::triangulate(&self.points);
+
+                // let triangles = quartic::triangulate(&self.points);
                 let edge_to_tri = {
                     let mut map: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
-                    for &(a_i, b_i, c_i) in &triangles {
+                    for &(a_i, b_i, c_i) in &self.triangles {
                         map.entry(utils::canonicalize_edge(a_i, b_i))
                             .or_default()
                             .push(c_i);
@@ -568,7 +583,8 @@ impl eframe::App for App {
 
                     // invariant region
                     if let Some(highlighted_point) = highlighted_point {
-                        let highlighted_point_triangles = triangles
+                        let highlighted_point_triangles = self
+                            .triangles
                             .iter()
                             .filter_map(|&(a_i, b_i, c_i)| match highlighted_point {
                                 _ if a_i == highlighted_point => Some((b_i, c_i)),
@@ -804,7 +820,7 @@ impl eframe::App for App {
                     // draw triangulation
                     {
                         const COLOR: Color32 = Color32::from_rgb(150, 150, 150);
-                        for (a_i, b_i, c_i) in triangles {
+                        for &(a_i, b_i, c_i) in &self.triangles {
                             let a = camera_map.cam_to_egui(self.points[a_i]);
                             let b = camera_map.cam_to_egui(self.points[b_i]);
                             let c = camera_map.cam_to_egui(self.points[c_i]);
@@ -826,7 +842,7 @@ impl eframe::App for App {
                             painter.circle_filled(
                                 camera_map.cam_to_egui(point),
                                 // so if you're zoomed out, points don't cover everything
-                                (camera_map.cam_to_egui_x(0.01) - camera_map.cam_to_egui_x(0.0))
+                                (camera_map.cam_to_egui_x(0.003) - camera_map.cam_to_egui_x(0.0))
                                     .min(5.0),
                                 Color32::from_rgb(200, 200, 200),
                             );

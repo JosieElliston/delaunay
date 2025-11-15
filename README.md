@@ -30,6 +30,7 @@
 - look out 2*node_width
 - maybe: if a triangle is big enough, it must be acute
 - if a path from a cell to another cell crosses >= 3 quadtree lines in the same direction, they can't be an edge (i think this is correct)
+- instead of requiring every edge to be in neighbors, maybe require every triangle to have an edge in neighbors?
 
 ## other TODO
 
