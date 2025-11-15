@@ -1,3 +1,4 @@
+mod oracle;
 mod point;
 mod quartic;
 mod tree;
@@ -162,11 +163,11 @@ struct App {
 }
 impl App {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        let mut rng = rand::rngs::SmallRng::seed_from_u64(4);
-        let tree_shape = TreeShape::from_random(0.5, 5, &mut rng);
+        // let mut rng = rand::rngs::SmallRng::seed_from_u64(4);
+        // let tree_shape = TreeShape::from_random(0.5, 5, &mut rng);
 
-        // let mut rng = rand::rngs::SmallRng::seed_from_u64(8);
-        // let tree_shape = TreeShape::from_random(0.3, 6, &mut rng);
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(8);
+        let tree_shape = TreeShape::from_random(0.2, 6, &mut rng);
         let mut ret = Self {
             camera: Camera::new(0.5, 0.5, 0.7),
             velocity: Vec2::ZERO,
@@ -192,7 +193,8 @@ impl App {
     }
 
     fn update_triangulation(&mut self) {
-        self.triangles = quartic::triangulate(&self.points);
+        // self.triangles = quartic::triangulate(&self.points);
+        self.triangles = oracle::triangulate(&self.points);
     }
 }
 impl eframe::App for App {
@@ -220,7 +222,7 @@ impl eframe::App for App {
                             .enumerate()
                             .map(|(p_i, &p)| (p_i, tree.node_of_point(p).unwrap()))
                             .collect();
-                        for (a_i, b_i, c_i) in quartic::triangulate(tree.points()) {
+                        for (a_i, b_i, c_i) in oracle::triangulate(tree.points()) {
                             // they aren't edges but canonicalize_edge still works
                             *self
                                 .hist
@@ -669,7 +671,7 @@ impl eframe::App for App {
                                 {
                                     // let mut points_prime = self.points.clone();
                                     // points_prime[highlighted_point] = q;
-                                    // let oracle = triangles == quartic::triangulate(&points_prime);
+                                    // let oracle = triangles == oracle::triangulate(&points_prime);
                                 }
 
                                 // this only checks for one kind of flip
@@ -842,8 +844,8 @@ impl eframe::App for App {
                             painter.circle_filled(
                                 camera_map.cam_to_egui(point),
                                 // so if you're zoomed out, points don't cover everything
-                                (camera_map.cam_to_egui_x(0.003) - camera_map.cam_to_egui_x(0.0))
-                                    .min(5.0),
+                                (camera_map.cam_to_egui_x(0.001) - camera_map.cam_to_egui_x(0.0))
+                                    .min(3.0),
                                 Color32::from_rgb(200, 200, 200),
                             );
                         }

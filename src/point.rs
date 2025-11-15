@@ -22,7 +22,6 @@ impl Point {
         self.y
     }
 }
-
 impl From<Point> for (Coord, Coord) {
     fn from(p: Point) -> Self {
         (p.x(), p.y())
@@ -36,6 +35,11 @@ impl From<(Coord, Coord)> for Point {
 impl From<(f32, f32)> for Point {
     fn from(t: (f32, f32)) -> Self {
         Point::new(t.0 as Coord, t.1 as Coord)
+    }
+}
+impl From<Point> for spade::Point2<Coord> {
+    fn from(p: Point) -> Self {
+        spade::Point2::new(p.x(), p.y())
     }
 }
 
